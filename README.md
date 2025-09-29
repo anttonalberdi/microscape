@@ -1,1 +1,3 @@
-# interspace_modelling
+# MicroScape
+
+Integrative modelling of microbial landscapes
