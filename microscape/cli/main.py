@@ -137,55 +137,19 @@ def demo(outdir: str = "outputs/demo_001", plot: bool = typer.Option(True, help=
 def demo2(
     config: str = typer.Option(
         "examples/00_synthetic/community_sbml.yml",
-        help="YAML config file for the SBML/dFBA demo",
-    ),
-    outdir: str = typer.Option(
-        "outputs/demo2_gsmm",
-        help="Output directory",
-    ),
-    plot: bool = typer.Option(
-        True, help="Save PNG heatmaps if plotting is available"
-    ),
-):
-    """
-    Demo 2: SBML‐driven community (GSMM dFBA + diffusion).
-    Loads 3 SBML models (FD/LU/BP), runs (p)FBA each step, couples exchanges to RD fields.
-    """
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    typer.echo("🔧 Initialising Demo 2 (GSMM via SBML)…")
-    with Progress() as progress:
-        task = progress.add_task("[cyan]Simulating…", total=100)  # coarse bar
-        def cb(i, total):
-            progress.update(task, completed=min(i, 100))
-        fields, summary = run_demo_gsmm(config, outdir, progress_cb=cb)
-
-    # save arrays
-    np.savez_compressed(outdir / "fields.npz", **fields)
-
-    # save summary
-    with open(outdir / "summary.csv", "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["metric", "value"])
-        for k, v in summary.items():
-            w.writerow([k, v])@app.command("demo2")
-def demo2(
-    config: str = typer.Option(
-        "examples/00_synthetic/community_sbml.yml",
         help="YAML config for the SBML/dFBA demo",
     ),
     outdir: str = typer.Option("outputs/demo2_gsmm", help="Output directory"),
     plot: bool = typer.Option(True, help="Save PNG heatmaps"),
 ):
-    # lazy import so the rest of the CLI works without GSMM deps
+    # --- lazy import so the rest of the CLI works even if COBRA or the file is missing ---
     try:
+        # IMPORTANT: import here, not at top-level
         from ..coupling.loop_gsmm import run_demo_gsmm
     except Exception as e:
         typer.secho(
-            "GSMM demo not available. Ensure the file "
-            "`microscape/coupling/loop_gsmm.py` is packaged and COBRApy is installed.\n"
-            "Try: pip install cobra optlang  (or conda install -c conda-forge cobra)",
+            "GSMM demo not available. Ensure file 'microscape/coupling/loop_gsmm.py' "
+            "is packaged and COBRApy is installed (pip install cobra optlang).",
             fg=typer.colors.RED,
         )
         raise typer.Exit(code=1)
@@ -194,7 +158,9 @@ def demo2(
     from pathlib import Path
     import numpy as np, csv
 
-    outdir = Path(outdir); outdir.mkdir(parents=True, exist_ok=True)
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
     typer.echo("🔧 Initialising Demo 2 (GSMM via SBML)…")
     with Progress() as progress:
         task = progress.add_task("[cyan]Simulating…", total=100)
