@@ -6,6 +6,7 @@ import typer, numpy as np
 from rich.progress import Progress
 import importlib.resources as ir
 
+from microscape.utils.resources import get_packaged_example
 from ..coupling.loop import run_minimal, compute_summary, save_summary_csv
 from ..io import sdp as sdpio
 from ..viz.plotting import save_heatmap, save_profile
