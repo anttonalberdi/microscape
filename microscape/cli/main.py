@@ -54,34 +54,36 @@ def demo(outdir: str = "outputs/demo_001", plot: bool = typer.Option(True, help=
 @app.command()
 def update(
     ref: str = typer.Option("main", help="Git ref: branch, tag, or commit."),
-    with_deps: bool = typer.Option(False, help="Also reinstall dependencies."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Less pip output."),
-    no_build_iso: bool = typer.Option(True, help="Use --no-build-isolation for speed."),
+    with_deps: bool = typer.Option(False, help="Reinstall dependencies too."),
 ):
     """
-    Update MicroScape from GitHub into the current environment.
-    By default, only the package is reinstalled (no dependency reinstall).
+    Update MicroScape from GitHub. Fast path (no deps) first; auto-retry with build isolation if needed.
     """
     url = f"{REPO_URL}@{ref}"
     if not yes:
-        typer.confirm(
-            f"This will install from {url} into the current environment ({sys.executable}). Continue?",
-            abort=True,
-        )
+        typer.confirm(f"This will install from {url} into ({sys.executable}). Continue?", abort=True)
 
-    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall", url]
-    if not with_deps:
-        cmd.insert(5, "--no-deps")
-    if no_build_iso:
-        cmd.insert(5, "--no-build-isolation")
+    base = [sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall"]
     if quiet:
-        cmd.insert(5, "-q")
+        base.append("-q")
 
-    typer.echo("Running: " + " ".join(cmd))
+    # 1) Fast path: no deps, no build isolation
+    cmd = base + ["--no-deps", "--no-build-isolation", url]
     try:
-        subprocess.check_call(cmd)
-        typer.secho("MicroScape updated successfully.", fg=typer.colors.GREEN)
+        _run(cmd)
+        typer.secho("MicroScape updated (fast path).", fg=typer.colors.GREEN)
+        return
     except subprocess.CalledProcessError as e:
-        typer.secho(f"Update failed (exit {e.returncode}).", fg=typer.colors.RED)
+        errmsg = str(e)
+        typer.secho("Fast update failed; retrying with build isolation…", fg=typer.colors.YELLOW)
+
+    # 2) Retry: allow build isolation (will fetch hatchling); include deps if requested
+    cmd = base + ([url] if not with_deps else [url])
+    try:
+        _run(cmd)
+        typer.secho("MicroScape updated (build isolation).", fg=typer.colors.GREEN)
+    except subprocess.CalledProcessError as e:
+        typer.secho(f"Update failed (exit {e.returncode}). Try installing 'hatchling' in your env.", fg=typer.colors.RED)
         raise typer.Exit(code=e.returncode)
