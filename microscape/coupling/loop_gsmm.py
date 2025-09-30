@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Dict, Tuple
 import numpy as np
 import yaml
+import importlib.resources as ir
+
 
 from ..rd.simple import diffuse_step
 from ..io.sbml import load_sbml_model, map_exchanges, require_cobra
@@ -11,7 +13,31 @@ from ..metabolism.fba import run_fba_with_bounds
 def load_config(yaml_path: str) -> dict:
     p = Path(yaml_path)
     if not p.exists():
-        raise FileNotFoundError(f"Config not found: {p}")
+        # Try to load from packaged resources
+        # First assume path is relative to packaged examples
+        candidates = []
+        # packaged examples under top-level "examples"
+        candidates.append(("examples/00_synthetic/community_sbml.yml", None))
+        # if user passed a relative path, try it under packaged root
+        if not yaml_path.startswith("examples/"):
+            candidates.append((yaml_path, None))
+
+        for rel, _ in candidates:
+            try:
+                with ir.files("microscape").joinpath(rel).open("rb") as fh:
+                    import yaml as _yaml
+                    return _yaml.safe_load(fh.read())
+            except Exception:
+                pass
+        # As a last attempt, look next to this module (installed tree)
+        pkg_root = Path(__file__).resolve().parents[2]  # .../microscape
+        alt = pkg_root / "examples" / "00_synthetic" / "community_sbml.yml"
+        if alt.exists():
+            import yaml as _yaml
+            return _yaml.safe_load(alt.read_text())
+
+        raise FileNotFoundError(f"Config not found: {p} (and no packaged fallback found)")
+    import yaml
     return yaml.safe_load(p.read_text())
 
 def init_fields(cfg: dict, H: int, W: int) -> Dict[str, np.ndarray]:

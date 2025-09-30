@@ -4,6 +4,7 @@ import json, subprocess, sys, typer, csv, shutil
 from pathlib import Path
 import typer, numpy as np
 from rich.progress import Progress
+import importlib.resources as ir
 
 from ..coupling.loop import run_minimal, compute_summary, save_summary_csv
 from ..io import sdp as sdpio
