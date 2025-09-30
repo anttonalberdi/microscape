@@ -159,7 +159,7 @@ def demo2(
     with Progress() as progress:
         task = progress.add_task("[cyan]Simulating…", total=100)
         def cb(i, total): progress.update(task, completed=min(i, 100))
-        fields, summary = run_demo_gsmm(config, outdir, progress_cb=cb)
+        fields, summary = demo2(config, outdir, progress_cb=cb)
 
     np.savez_compressed(outdir / "fields.npz", **fields)
     with open(outdir / "summary.csv", "w", newline="") as f:
