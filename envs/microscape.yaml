@@ -1,0 +1,14 @@
+name: microscape
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - pandas
+  - scikit-learn
+  - networkx
+  - matplotlib
+  - pip
+  - pip:
+      - git+https://github.com/anttonalberdi/microscape.git

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "microscape"
+version = "0.0.1"
+description = "Spatial microbiome modelling (MicroScape)"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "InterSpace Team" }]
+dependencies = [
+  "numpy",
+  "scipy",
+  "xarray",
+  "anndata",
+  "zarr",
+  "pydantic>=2",
+  "typer[all]>=0.9",
+  "matplotlib",
+  "networkx",
+]
+
+[project.optional-dependencies]
+viz = ["napari", "vitessce"]
+pde = ["fipy"]
+stats = ["scikit-gstat", "pysal"]
+calib = ["sbi", "torch"]
+
+[project.scripts]
+microscape = "microscape.cli.main:app"
