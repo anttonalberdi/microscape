@@ -141,43 +141,49 @@ def demo2(
     outdir: str = typer.Option("outputs/demo2_gsmm", help="Output directory"),
     plot: bool = typer.Option(True, help="Save PNG heatmaps"),
 ):
-    # lazy import so other commands still work if COBRA/GSMM demo isn’t installed
+    # Lazy import so other commands work even if GSMM deps not present
     try:
         from ..coupling.loop_gsmm import run_demo_gsmm
-    except Exception:
+    except Exception as e:
         typer.secho(
-            "GSMM demo not available. Ensure 'microscape/coupling/loop_gsmm.py' is packaged "
-            "and COBRApy is installed (pip install cobra optlang).",
+            f"GSMM demo unavailable ({e}). Ensure 'microscape/coupling/loop_gsmm.py' exists.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(code=1)
 
-    # default config from packaged examples
+    # Default config: packaged demo2 config
     if config is None:
         try:
-            from microscape.utils.resources import get_packaged_example
-            config = get_packaged_example("examples/00_synthetic/community_sbml.yml")
+            from ..utils.resources import get_packaged_path
+            config = get_packaged_path("microscape/examples/demo2/community_sbml.yml")
         except Exception:
-            config = "microscape/examples/00_synthetic/community_sbml.yml"
+            # fallback to source tree
+            config = "microscape/examples/demo2/community_sbml.yml"
 
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
-
+    out = Path(outdir); out.mkdir(parents=True, exist_ok=True)
     typer.echo("🔧 Initialising Demo 2 (GSMM via SBML)…")
+
     with Progress() as progress:
         task = progress.add_task("[cyan]Simulating…", total=100)
         def cb(i, total): progress.update(task, completed=min(i, 100))
-        fields, summary = run_demo_gsmm(config, outdir, progress_cb=cb)
 
-    np.savez_compressed(outdir / "fields.npz", **fields)
-    with open(outdir / "summary.csv", "w", newline="") as f:
-        w = csv.writer(f); w.writerow(["metric","value"]); [w.writerow([k,v]) for k,v in summary.items()]
+        # **Correct call** (avoid demo2(...) recursion)
+        fields, summary = run_demo_gsmm(config, out, progress_cb=cb)
 
+    # Save arrays
+    np.savez_compressed(out / "fields.npz", **fields)
+
+    # Save a tiny CSV summary
+    with open(out / "summary.csv", "w", newline="") as f:
+        w = csv.writer(f); w.writerow(["metric", "value"])
+        for k, v in summary.items(): w.writerow([k, v])
+
+    # Optional plots (if your viz helper exists)
     if plot:
         try:
             from ..viz.plotting import save_heatmap
-            for k in ["glc","lac","ac","but"]:
-                if k in fields: save_heatmap(fields[k], outdir / f"{k}.png", title=k.upper())
+            for k in ("glc", "lac", "ac", "but"):
+                if k in fields: save_heatmap(fields[k], out / f"{k}.png", title=k.upper())
         except Exception as e:
             typer.echo(f"(plotting skipped: {e})")
 

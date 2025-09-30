@@ -35,4 +35,4 @@ microscape = "microscape.cli.main:app"
 packages = ["microscape"]
 
 [tool.hatch.build.targets.sdist]
-include = ["microscape/**", "README.md", "pyproject.toml", "LICENSE"]
+include = ["microscape/**", "microscape/**/*.py", "microscape/examples/**", "README.md", "pyproject.toml", "LICENSE"]
