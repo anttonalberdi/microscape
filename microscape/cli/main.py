@@ -1,23 +1,19 @@
 from __future__ import annotations
-import typer, json
+import typer, numpy as np
 from pathlib import Path
-import numpy as np
 from ..coupling.loop import run_minimal
-from ..io import sdp as sdpio
+from ..utils import get_demo_dir
 
 app = typer.Typer(add_completion=False)
 
 @app.command()
-def validate_sdp(path: str):
-    schema = sdpio.validate_sdp(path)
-    typer.echo(json.dumps(schema.model_dump(), indent=2))
-
-@app.command()
-def simulate(config: str = typer.Argument(None), out: str = "outputs/run_001.npz"):
+def demo(out: str = "outputs/run_demo.npz"):
+    """
+    Run the bundled synthetic demo without specifying any paths.
+    """
+    demo_path = get_demo_dir()
+    typer.echo(f"Using demo at: {demo_path}")
     Path(Path(out).parent).mkdir(parents=True, exist_ok=True)
     res = run_minimal()
     np.savez_compressed(out, **res)
     typer.echo(f"Saved results to {out}")
-
-if __name__ == "__main__":
-    app()

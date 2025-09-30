@@ -30,3 +30,19 @@ calib = ["sbi", "torch"]
 
 [project.scripts]
 microscape = "microscape.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["microscape"]
+include = [
+  "microscape/examples/**",
+  "microscape/config/**"
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "microscape/examples/**",
+  "microscape/config/**",
+  "pyproject.toml",
+  "README.md",
+  "LICENSE"
+]
