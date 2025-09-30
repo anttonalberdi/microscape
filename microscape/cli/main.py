@@ -137,24 +137,16 @@ def demo(outdir: str = "outputs/demo_001", plot: bool = typer.Option(True, help=
 
 @app.command("demo2")
 def demo2(
-    config: str = typer.Option(
-        "examples/00_synthetic/community_sbml.yml",
-        help="YAML config for the SBML/dFBA demo",
-    ),
+    config: str = typer.Option(None, help="YAML config for the SBML/dFBA demo"),
     outdir: str = typer.Option("outputs/demo2_gsmm", help="Output directory"),
     plot: bool = typer.Option(True, help="Save PNG heatmaps"),
 ):
-    # --- lazy import so the rest of the CLI works even if COBRA or the file is missing ---
-    try:
-        # IMPORTANT: import here, not at top-level
-        from ..coupling.loop_gsmm import run_demo_gsmm
-    except Exception as e:
-        typer.secho(
-            "GSMM demo not available. Ensure file 'microscape/coupling/loop_gsmm.py' "
-            "is packaged and COBRApy is installed (pip install cobra optlang).",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(code=1)
+    if config is None:
+        try:
+            config = get_packaged_example("examples/00_synthetic/community_sbml.yml")
+        except Exception:
+            typer.secho("Could not find packaged example, falling back to local path.", fg=typer.colors.YELLOW)
+            config = "examples/00_synthetic/community_sbml.yml"
 
     from rich.progress import Progress
     from pathlib import Path
