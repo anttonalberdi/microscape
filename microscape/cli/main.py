@@ -2,6 +2,7 @@ from __future__ import annotations
 import json, subprocess, sys
 from pathlib import Path
 import typer, numpy as np
+from rich.progress import Progress
 
 from ..coupling.loop import run_minimal, compute_summary, save_summary_csv
 from ..io import sdp as sdpio
@@ -36,11 +37,22 @@ def demo(outdir: str = "outputs/demo_001", plot: bool = typer.Option(True, help=
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    res = run_minimal()
+    typer.echo("🔧 Initialising demo (fibre → butyrate on a small tissue slice)…")
+
+    # Progress bar for the simulation loop
+    steps = 200
+    with Progress() as progress:
+        task = progress.add_task("[cyan]Simulating diffusion & production…", total=steps)
+        def cb(i, total):
+            progress.update(task, completed=i)
+        res = run_minimal(sim_steps=steps, dt=5.0, voxel_um=10.0, progress_cb=cb)
+
+    typer.echo("🧮 Computing summaries (SCFA-at-mucosa, radial profile)…")
+    summary = compute_summary(res["butyrate"], res["mucosa_mask"])
+
+    typer.echo("💾 Writing outputs (arrays, CSV, plots)…")
     fields_npz = outdir / "fields.npz"
     np.savez_compressed(fields_npz, **res)
-
-    summary = compute_summary(res["butyrate"], res["mucosa_mask"])
     save_summary_csv(summary, outdir / "summary.csv")
 
     if plot:
@@ -49,8 +61,12 @@ def demo(outdir: str = "outputs/demo_001", plot: bool = typer.Option(True, help=
         save_profile(summary["profile_dist_px"], summary["profile_mean"], outdir / "radial_profile.png",
                      title="Butyrate vs distance from mucosa")
 
-    typer.echo(f"Demo complete.\n- Arrays: {fields_npz}\n- Summary: {outdir/'summary.csv'}\n- Plots: {outdir/'butyrate.png'}, {outdir/'radial_profile.png'}")
-
+    typer.echo("✅ Demo complete.")
+    typer.echo(f"   • Arrays:   {fields_npz}")
+    typer.echo(f"   • Summary:  {outdir/'summary.csv'}")
+    if plot:
+        typer.echo(f"   • Plots:    {outdir/'butyrate.png'}, {outdir/'radial_profile.png'}")
+        
 @app.command()
 def update(
     ref: str = typer.Option("main", help="Git ref: branch, tag, or commit."),
