@@ -4,13 +4,17 @@ channels:
   - bioconda
 dependencies:
   - python=3.11
-  - numpy
-  - scipy
-  - pandas
-  - scikit-learn
-  - networkx
-  - matplotlib
-  - cobra
+  - numpy=2.3.3
+  - scipy=1.16.2
+  - pandas=2.3.3
+  - scikit-learn=1.7.2
+  - hatchling=1.27.0
+  - networkx=3.5
+  - matplotlib=3.10.6
+  - optlang=1.8.3
+  - swiglpk=5.0.12
+  - cobra=0.29.1
+  - python-libsbml=5.20.5
   - pip
   - pip:
       - git+https://github.com/anttonalberdi/microscape.git

@@ -39,10 +39,4 @@ include = [
 ]
 
 [tool.hatch.build.targets.sdist]
-include = [
-  "microscape/examples/**",
-  "microscape/config/**",
-  "pyproject.toml",
-  "README.md",
-  "LICENSE"
-]
+include = ["microscape/**", "examples/**", "README.md", "pyproject.toml", "LICENSE"]
