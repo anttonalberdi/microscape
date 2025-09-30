@@ -10,6 +10,7 @@ dependencies:
   - scikit-learn
   - networkx
   - matplotlib
+  - cobra
   - pip
   - pip:
       - git+https://github.com/anttonalberdi/microscape.git
