@@ -1,3 +1,0 @@
-# MicroScape Docs
-
-Coming soon.
