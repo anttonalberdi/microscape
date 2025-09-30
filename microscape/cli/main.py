@@ -141,16 +141,24 @@ def demo2(
     outdir: str = typer.Option("outputs/demo2_gsmm", help="Output directory"),
     plot: bool = typer.Option(True, help="Save PNG heatmaps"),
 ):
+    # lazy import so other commands still work if COBRA/GSMM demo isn’t installed
+    try:
+        from ..coupling.loop_gsmm import run_demo_gsmm
+    except Exception:
+        typer.secho(
+            "GSMM demo not available. Ensure 'microscape/coupling/loop_gsmm.py' is packaged "
+            "and COBRApy is installed (pip install cobra optlang).",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    # default config from packaged examples
     if config is None:
         try:
+            from microscape.utils.resources import get_packaged_example
             config = get_packaged_example("examples/00_synthetic/community_sbml.yml")
         except Exception:
-            typer.secho("Could not find packaged example, falling back to local path.", fg=typer.colors.YELLOW)
-            config = "examples/00_synthetic/community_sbml.yml"
-
-    from rich.progress import Progress
-    from pathlib import Path
-    import numpy as np, csv
+            config = "microscape/examples/00_synthetic/community_sbml.yml"
 
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -159,7 +167,7 @@ def demo2(
     with Progress() as progress:
         task = progress.add_task("[cyan]Simulating…", total=100)
         def cb(i, total): progress.update(task, completed=min(i, 100))
-        fields, summary = demo2(config, outdir, progress_cb=cb)
+        fields, summary = run_demo_gsmm(config, outdir, progress_cb=cb)
 
     np.savez_compressed(outdir / "fields.npz", **fields)
     with open(outdir / "summary.csv", "w", newline="") as f:
