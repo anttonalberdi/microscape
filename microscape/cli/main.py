@@ -155,10 +155,10 @@ def demo2(
     if config is None:
         try:
             from ..utils.resources import get_packaged_path
-            config = get_packaged_path("microscape/examples/demo2/community_sbml.yml")
+            config = get_packaged_path("examples/demo2/community_sbml.yml")
         except Exception:
             # fallback to source tree
-            config = "microscape/examples/demo2/community_sbml.yml"
+            config = "examples/demo2/community_sbml.yml"
 
     out = Path(outdir); out.mkdir(parents=True, exist_ok=True)
     typer.echo("🔧 Initialising Demo 2 (GSMM via SBML)…")
