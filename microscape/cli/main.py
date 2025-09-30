@@ -36,25 +36,17 @@ def demo(out: str = "outputs/run_demo.npz"):
     np.savez_compressed(out, **res)
     typer.echo(f"Demo finished. Saved results to {out}")
 
-# ---------- NEW ----------
 @app.command()
 def update(
-    ref: str = typer.Option(
-        "main",
-        help="Git ref to install (branch, tag, or commit SHA). Default: main",
-    ),
-    yes: bool = typer.Option(
-        False, "--yes", "-y", help="Do not prompt for confirmation."
-    ),
-    quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Less pip output."
-    ),
+    ref: str = typer.Option("main", help="Git ref: branch, tag, or commit."),
+    with_deps: bool = typer.Option(False, help="Also reinstall dependencies."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Less pip output."),
+    no_build_iso: bool = typer.Option(True, help="Use --no-build-isolation for speed."),
 ):
     """
-    Update MicroScape to the latest version from GitHub in the *current* environment.
-
-    Equivalent to:
-      python -m pip install --upgrade --force-reinstall git+https://github.com/anttonalberdi/microscape.git@<ref>
+    Update MicroScape from GitHub into the current environment.
+    By default, only the package is reinstalled (no dependency reinstall).
     """
     url = f"{REPO_URL}@{ref}"
     if not yes:
@@ -63,23 +55,18 @@ def update(
             abort=True,
         )
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "--upgrade",
-        "--force-reinstall",
-        url,
-    ]
+    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall", url]
+    if not with_deps:
+        cmd.insert(5, "--no-deps")  # after 'install'
+    if no_build_iso:
+        cmd.insert(5, "--no-build-isolation")
     if quiet:
-        cmd.insert(-1, "-q")
+        cmd.insert(5, "-q")
 
     typer.echo("Running: " + " ".join(cmd))
     try:
         subprocess.check_call(cmd)
         typer.secho("MicroScape updated successfully.", fg=typer.colors.GREEN)
     except subprocess.CalledProcessError as e:
-        typer.secho(f"Update failed with exit code {e.returncode}.", fg=typer.colors.RED)
+        typer.secho(f"Update failed (exit {e.returncode}).", fg=typer.colors.RED)
         raise typer.Exit(code=e.returncode)
-# ---------- NEW ----------
