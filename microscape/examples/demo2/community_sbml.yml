@@ -27,4 +27,4 @@ bounds:
   uptake_k: {glc: 0.05, lac: 0.04, ac: 0.03, but: 0.0}
   max_ub:   {glc: 10.0, lac: 10.0, ac: 10.0, but: 0.0}
 
-alpha_flux_to_dC: 1e-3
+alpha_flux_to_dC: 5e-3
