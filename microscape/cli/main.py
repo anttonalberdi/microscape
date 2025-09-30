@@ -1,3 +1,6 @@
+import subprocess
+import sys
+import typer
 from __future__ import annotations
 import json, subprocess, sys
 from pathlib import Path
@@ -66,7 +69,7 @@ def demo(outdir: str = "outputs/demo_001", plot: bool = typer.Option(True, help=
     typer.echo(f"   • Summary:  {outdir/'summary.csv'}")
     if plot:
         typer.echo(f"   • Plots:    {outdir/'butyrate.png'}, {outdir/'radial_profile.png'}")
-        
+
 @app.command()
 def update(
     ref: str = typer.Option("main", help="Git ref: branch, tag, or commit."),
@@ -74,9 +77,6 @@ def update(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Less pip output."),
     with_deps: bool = typer.Option(False, help="Reinstall dependencies too."),
 ):
-    """
-    Update MicroScape from GitHub. Fast path (no deps) first; auto-retry with build isolation if needed.
-    """
     url = f"{REPO_URL}@{ref}"
     if not yes:
         typer.confirm(f"This will install from {url} into ({sys.executable}). Continue?", abort=True)
@@ -87,19 +87,24 @@ def update(
 
     # 1) Fast path: no deps, no build isolation
     cmd = base + ["--no-deps", "--no-build-isolation", url]
+    typer.echo("Running: " + " ".join(cmd))
     try:
-        _run(cmd)
+        subprocess.check_call(cmd)
         typer.secho("MicroScape updated (fast path).", fg=typer.colors.GREEN)
         return
-    except subprocess.CalledProcessError as e:
-        errmsg = str(e)
+    except subprocess.CalledProcessError:
         typer.secho("Fast update failed; retrying with build isolation…", fg=typer.colors.YELLOW)
 
-    # 2) Retry: allow build isolation (will fetch hatchling); include deps if requested
-    cmd = base + ([url] if not with_deps else [url])
+    # 2) Retry with build isolation (installs hatchling if needed); include deps if requested
+    cmd = base + ([url])
+    typer.echo("Running: " + " ".join(cmd))
     try:
-        _run(cmd)
+        subprocess.check_call(cmd)
         typer.secho("MicroScape updated (build isolation).", fg=typer.colors.GREEN)
     except subprocess.CalledProcessError as e:
-        typer.secho(f"Update failed (exit {e.returncode}). Try installing 'hatchling' in your env.", fg=typer.colors.RED)
+        typer.secho(
+            f"Update failed (exit {e.returncode}). "
+            "Install 'hatchling' in your env or run with '--with-deps'.",
+            fg=typer.colors.RED,
+        )
         raise typer.Exit(code=e.returncode)
