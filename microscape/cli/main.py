@@ -1,19 +1,85 @@
+# microscape/cli/main.py
 from __future__ import annotations
-import typer, numpy as np
+import json
+import subprocess
+import sys
 from pathlib import Path
+import typer
+import numpy as np
+
 from ..coupling.loop import run_minimal
-from ..utils import get_demo_dir
+from ..io import sdp as sdpio
 
 app = typer.Typer(add_completion=False)
 
+REPO_URL = "git+https://github.com/anttonalberdi/microscape.git"
+
 @app.command()
-def demo(out: str = "outputs/run_demo.npz"):
-    """
-    Run the bundled synthetic demo without specifying any paths.
-    """
-    demo_path = get_demo_dir()
-    typer.echo(f"Using demo at: {demo_path}")
+def validate_sdp(path: str):
+    """Validate a Spatial Data Package (SDP)."""
+    schema = sdpio.validate_sdp(path)
+    typer.echo(json.dumps(schema.model_dump(), indent=2))
+
+@app.command()
+def simulate(config: str = typer.Argument(None), out: str = "outputs/run_001.npz"):
+    """Run a minimal synthetic simulation demo (placeholder for config-driven runs)."""
     Path(Path(out).parent).mkdir(parents=True, exist_ok=True)
     res = run_minimal()
     np.savez_compressed(out, **res)
     typer.echo(f"Saved results to {out}")
+
+@app.command()
+def demo(out: str = "outputs/run_demo.npz"):
+    """Run the built-in synthetic demo without any paths."""
+    Path(Path(out).parent).mkdir(parents=True, exist_ok=True)
+    res = run_minimal()
+    np.savez_compressed(out, **res)
+    typer.echo(f"Demo finished. Saved results to {out}")
+
+# ---------- NEW ----------
+@app.command()
+def update(
+    ref: str = typer.Option(
+        "main",
+        help="Git ref to install (branch, tag, or commit SHA). Default: main",
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Do not prompt for confirmation."
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Less pip output."
+    ),
+):
+    """
+    Update MicroScape to the latest version from GitHub in the *current* environment.
+
+    Equivalent to:
+      python -m pip install --upgrade --force-reinstall git+https://github.com/anttonalberdi/microscape.git@<ref>
+    """
+    url = f"{REPO_URL}@{ref}"
+    if not yes:
+        typer.confirm(
+            f"This will install from {url} into the current environment ({sys.executable}). Continue?",
+            abort=True,
+        )
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        "--force-reinstall",
+        url,
+    ]
+    if quiet:
+        cmd.insert(-1, "-q")
+
+    typer.echo("Running: " + " ".join(cmd))
+    try:
+        subprocess.check_call(cmd)
+        typer.secho("MicroScape updated successfully.", fg=typer.colors.GREEN)
+    except subprocess.CalledProcessError as e:
+        typer.secho(f"Update failed with exit code {e.returncode}.", fg=typer.colors.RED)
+        raise typer.Exit(code=e.returncode)
+# ---------- NEW ----------
