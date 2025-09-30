@@ -1,8 +1,6 @@
-import subprocess
-import sys
-import typer
+
 from __future__ import annotations
-import json, subprocess, sys
+import json, subprocess, sys, typer
 from pathlib import Path
 import typer, numpy as np
 from rich.progress import Progress
