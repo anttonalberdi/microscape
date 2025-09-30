@@ -1,17 +1,13 @@
-# microscape/cli/main.py
 from __future__ import annotations
-import json
-import subprocess
-import sys
+import json, subprocess, sys
 from pathlib import Path
-import typer
-import numpy as np
+import typer, numpy as np
 
-from ..coupling.loop import run_minimal
+from ..coupling.loop import run_minimal, compute_summary, save_summary_csv
 from ..io import sdp as sdpio
+from ..viz.plotting import save_heatmap, save_profile
 
 app = typer.Typer(add_completion=False)
-
 REPO_URL = "git+https://github.com/anttonalberdi/microscape.git"
 
 @app.command()
@@ -29,12 +25,31 @@ def simulate(config: str = typer.Argument(None), out: str = "outputs/run_001.npz
     typer.echo(f"Saved results to {out}")
 
 @app.command()
-def demo(out: str = "outputs/run_demo.npz"):
-    """Run the built-in synthetic demo without any paths."""
-    Path(Path(out).parent).mkdir(parents=True, exist_ok=True)
+def demo(outdir: str = "outputs/demo_001", plot: bool = typer.Option(True, help="Save PNG plots")):
+    """
+    Run the built-in synthetic demo and produce user-friendly outputs:
+    - fields.npz            (butyrate, fibre, mucosa_mask)
+    - summary.csv           (means, SCFA at mucosa)
+    - butyrate.png          (heatmap)
+    - radial_profile.png    (butyrate vs distance from mucosa)
+    """
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
     res = run_minimal()
-    np.savez_compressed(out, **res)
-    typer.echo(f"Demo finished. Saved results to {out}")
+    fields_npz = outdir / "fields.npz"
+    np.savez_compressed(fields_npz, **res)
+
+    summary = compute_summary(res["butyrate"], res["mucosa_mask"])
+    save_summary_csv(summary, outdir / "summary.csv")
+
+    if plot:
+        save_heatmap(res["butyrate"], outdir / "butyrate.png", title="Butyrate (a.u.)")
+        save_heatmap(res["fibre"], outdir / "fibre.png", title="Fibre", cmap="magma")
+        save_profile(summary["profile_dist_px"], summary["profile_mean"], outdir / "radial_profile.png",
+                     title="Butyrate vs distance from mucosa")
+
+    typer.echo(f"Demo complete.\n- Arrays: {fields_npz}\n- Summary: {outdir/'summary.csv'}\n- Plots: {outdir/'butyrate.png'}, {outdir/'radial_profile.png'}")
 
 @app.command()
 def update(
@@ -57,7 +72,7 @@ def update(
 
     cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall", url]
     if not with_deps:
-        cmd.insert(5, "--no-deps")  # after 'install'
+        cmd.insert(5, "--no-deps")
     if no_build_iso:
         cmd.insert(5, "--no-build-isolation")
     if quiet:
