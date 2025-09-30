@@ -16,8 +16,12 @@ fields:
 
 environment:
   mucosa_band_px: 5
-  fibre_patch: {shape: square, size_px: 10}
-  fibre_to_seeds: {glc_factor: 1.0}
+  fibre_patch:
+    shape: square
+    size_px: 16
+    center: [0.5, 0.5]   # relative in [0,1]; omit to default to center
+  fibre_to_seeds:
+    glc_value: 5.0  
 
 bounds:
   uptake_k: {glc: 0.05, lac: 0.04, ac: 0.03, but: 0.0}

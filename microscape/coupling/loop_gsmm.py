@@ -41,6 +41,19 @@ def _resolve_relative_to_config(path_like: str, config_dir: Path) -> Path:
 
     raise FileNotFoundError(f"SBML model not found: {path_like} (looked in {config_dir})")
 
+def _seed_fibre_patch(fields, cfg, H, W):
+    patch = (cfg.get("environment", {}) or {}).get("fibre_patch", {})
+    seeds = (cfg.get("environment", {}) or {}).get("fibre_to_seeds", {})
+    if not patch or "glc_value" not in seeds:
+        return
+    size = int(patch.get("size_px", 12))
+    cx_rel, cy_rel = patch.get("center", [0.5, 0.5])
+    cx, cy = int(cx_rel * W), int(cy_rel * H)
+    x0, x1 = max(0, cx - size//2), min(W, cx + size//2)
+    y0, y1 = max(0, cy - size//2), min(H, cy + size//2)
+    fields["glc"][y0:y1, x0:x1] = float(seeds["glc_value"])
+
+
 # ---- Your existing demo core (minimal placeholder below) ----
 
 def run_demo_gsmm(config_path: str, outdir: str, progress_cb: ProgressCB | None = None) -> Tuple[Dict[str, np.ndarray], Dict[str, float]]:
