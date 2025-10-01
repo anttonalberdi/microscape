@@ -23,7 +23,7 @@ wget https://raw.githubusercontent.com/anttonalberdi/microscape/refs/heads/main/
 wget https://raw.githubusercontent.com/anttonalberdi/microscape/refs/heads/main/examples/demo1/FD.xml
 wget https://raw.githubusercontent.com/anttonalberdi/microscape/refs/heads/main/examples/demo1/LU.xml
 
-microscape simulate graph_demo.yml
+microscape simulate demo1.yml
 ```
 
 https://github.com/anttonalberdi/microscape/tree/branch/foldername

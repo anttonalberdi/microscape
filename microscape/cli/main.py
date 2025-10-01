@@ -81,27 +81,38 @@ def update(
 
 @app.command("simulate")
 def simulate_cmd(
-    config: Path = typer.Argument(..., help="YAML config (graph or grid)"),
-    engine: str = typer.Option("toy", help="Engine: toy (others can be added later)"),
+    config: Path = typer.Argument(..., help="YAML config (space: graph; SBML models required)"),
     outdir: Path = typer.Option("outputs/run", help="Output directory"),
     plot: bool = typer.Option(True, help="Save plots"),
 ):
     """
-    General simulation entrypoint. Dispatches on space.type in the YAML.
+    General simulation entrypoint (SBML/COBRA backend only).
+    - Expects: space.type: graph
+               models: { guild: /path/to/model.xml, ... }
+               metabolite_map: { field: exchange_rxn_id, ... }
     """
-    # Load once (also lets us resolve relative paths in future)
-    cfg = load_graph_yaml(config)  # works for graph; harmless for reading 'space' key for grid later
+    # Load config (also resolves relative paths in your loader)
+    cfg = load_graph_yaml(config)
     space_type = (cfg.get("space") or {}).get("type", "graph").lower()
-    engine = engine or ("sbml" if models_present else "toy")
 
-    if engine == "sbml":
-        from ..kinetics import sbml_engine  # register on import
-    step = get_engine(engine)
+    # Validate required SBML blocks
+    models_present = bool((cfg.get("models") or {}))
+    fmap_present = bool((cfg.get("metabolite_map") or {}))
+    if not models_present:
+        raise typer.BadParameter(
+            "SBML engine requires 'models:' in the YAML (guild -> SBML path)."
+        )
+    if not fmap_present:
+        raise typer.BadParameter(
+            "SBML engine requires 'metabolite_map:' in the YAML (field -> exchange reaction ID)."
+        )
+
+    # Import SBML engine (registers on import) and fetch step
+    from ..kinetics import sbml_engine  # noqa: F401 (ensures registration)
+    step = get_engine("sbml")
+
     outdir.mkdir(parents=True, exist_ok=True)
-
-    typer.secho(f"Engine: {engine}", fg=typer.colors.CYAN)
-    if engine == "toy" and models_present:
-        typer.secho("Note: 'models:' provided but engine='toy' ignores SBML models.", fg=typer.colors.YELLOW)
+    typer.secho("Engine: sbml (COBRA/libSBML)", fg=typer.colors.CYAN)
 
     with Progress() as progress:
         task = progress.add_task(f"[cyan]Simulating ({space_type})…", total=100)
@@ -111,8 +122,7 @@ def simulate_cmd(
             fields, summary = simulate_graph(str(config), step, progress=cb)
         else:
             raise typer.BadParameter(
-                f"Unsupported space.type '{space_type}'. "
-                "Currently supported: 'graph'."
+                f"Unsupported space.type '{space_type}'. Currently supported: 'graph'."
             )
 
     # Save outputs
