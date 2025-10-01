@@ -1,1 +1,98 @@
-<sbml>BP</sbml>
+<?xml version="1.0" encoding="UTF-8"?>
+<sbml xmlns="http://www.sbml.org/sbml/level3/version1/core"
+      xmlns:fbc="http://www.sbml.org/sbml/level3/version1/fbc/version2"
+      level="3" version="1" fbc:required="true">
+  <model id="BP" name="BP">
+    <listOfFunctionDefinitions/>
+    <listOfUnitDefinitions/>
+    <listOfCompartments>
+      <compartment id="e" name="extracellular" constant="true"/>
+      <compartment id="c" name="cytosol" constant="true"/>
+    </listOfCompartments>
+    <listOfParameters/>
+    <listOfSpecies>
+      <species id="ac_e" name="Acetate [e]" compartment="e" initialAmount="0" boundaryCondition="true" hasOnlySubstanceUnits="false" constant="false"/>
+      <species id="ac_c" name="Acetate [c]" compartment="c" initialAmount="0" boundaryCondition="false" hasOnlySubstanceUnits="false" constant="false"/>
+      <species id="but_e" name="Butyrate [e]" compartment="e" initialAmount="0" boundaryCondition="true" hasOnlySubstanceUnits="false" constant="false"/>
+      <species id="but_c" name="Butyrate [c]" compartment="c" initialAmount="0" boundaryCondition="false" hasOnlySubstanceUnits="false" constant="false"/>
+      <species id="biomass_c" name="Biomass [c]" compartment="c" initialAmount="0" boundaryCondition="false" hasOnlySubstanceUnits="false" constant="false"/>
+    </listOfSpecies>
+    <listOfReactions>
+      <reaction id="EX_ac_e" name="Exchange Acetate (e)" reversible="true">
+        <fbc:fluxBounds>
+          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="EX_ac_e" fbc:value="-1000"/>
+          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="EX_ac_e" fbc:value="1000"/>
+        </fbc:fluxBounds>
+        <listOfReactants>
+          <speciesReference species="ac_e" stoichiometry="1"/>
+        </listOfReactants>
+        <listOfProducts/>
+      </reaction>
+      <reaction id="EX_but_e" name="Exchange Butyrate (e)" reversible="true">
+        <fbc:fluxBounds>
+          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="EX_but_e" fbc:value="-1000"/>
+          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="EX_but_e" fbc:value="1000"/>
+        </fbc:fluxBounds>
+        <listOfReactants>
+          <speciesReference species="but_e" stoichiometry="1"/>
+        </listOfReactants>
+        <listOfProducts/>
+      </reaction>
+      <reaction id="T_ac" name="Transport acetate e->c" reversible="false">
+        <fbc:fluxBounds>
+          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="T_ac" fbc:value="0"/>
+          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="T_ac" fbc:value="1000"/>
+        </fbc:fluxBounds>
+        <listOfReactants>
+          <speciesReference species="ac_e" stoichiometry="1"/>
+        </listOfReactants>
+        <listOfProducts>
+          <speciesReference species="ac_c" stoichiometry="1"/>
+        </listOfProducts>
+      </reaction>
+      <reaction id="T_but" name="Transport butyrate c->e" reversible="false">
+        <fbc:fluxBounds>
+          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="T_but" fbc:value="0"/>
+          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="T_but" fbc:value="1000"/>
+        </fbc:fluxBounds>
+        <listOfReactants>
+          <speciesReference species="but_c" stoichiometry="1"/>
+        </listOfReactants>
+        <listOfProducts>
+          <speciesReference species="but_e" stoichiometry="1"/>
+        </listOfProducts>
+      </reaction>
+      <reaction id="BPF" name="Acetate to butyrate" reversible="false">
+        <fbc:fluxBounds>
+          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="BPF" fbc:value="0"/>
+          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="BPF" fbc:value="1000"/>
+        </fbc:fluxBounds>
+        <listOfReactants>
+          <speciesReference species="ac_c" stoichiometry="1"/>
+        </listOfReactants>
+        <listOfProducts>
+          <speciesReference species="but_c" stoichiometry="0.8"/>
+        </listOfProducts>
+      </reaction>
+      <reaction id="BIOMASS_BP" name="Biomass drain BP" reversible="false">
+        <fbc:fluxBounds>
+          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="BIOMASS_BP" fbc:value="0"/>
+          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="BIOMASS_BP" fbc:value="1000"/>
+        </fbc:fluxBounds>
+        <listOfReactants>
+          <speciesReference species="ac_c" stoichiometry="0.01"/>
+        </listOfReactants>
+        <listOfProducts>
+          <speciesReference species="biomass_c" stoichiometry="1"/>
+        </listOfProducts>
+      </reaction>
+    </listOfReactions>
+<fbc:listOfObjectives fbc:activeObjective="obj">
+  <fbc:objective fbc:id="obj" fbc:type="maximize">
+    <fbc:listOfFluxObjectives>
+      <fbc:fluxObjective fbc:reaction="BIOMASS_BP" fbc:coefficient="1.0"/>
+    </fbc:listOfFluxObjectives>
+  </fbc:objective>
+</fbc:listOfObjectives>
+  </model>
+</sbml>

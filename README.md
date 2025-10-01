@@ -17,7 +17,12 @@ microscape --help
 ### Run the synthetic demo
 
 ```bash
-wget https://raw.githubusercontent.com/anttonalberdi/microscape/refs/heads/main/examples/demo1/graph_demo.yml
+# Download data
+wget https://raw.githubusercontent.com/anttonalberdi/microscape/refs/heads/main/examples/demo1/demo1.yml
+wget https://raw.githubusercontent.com/anttonalberdi/microscape/refs/heads/main/examples/demo1/BP.xml
+wget https://raw.githubusercontent.com/anttonalberdi/microscape/refs/heads/main/examples/demo1/FD.xml
+wget https://raw.githubusercontent.com/anttonalberdi/microscape/refs/heads/main/examples/demo1/LU.xml
+
 microscape simulate graph_demo.yml
 ```
 
