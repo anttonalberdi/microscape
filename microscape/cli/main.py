@@ -96,8 +96,7 @@ def simulate_cmd(
     engine = engine or ("sbml" if models_present else "toy")
 
     if engine == "sbml":
-    from ..kinetics import sbml_engine  # register on import
-
+        from ..kinetics import sbml_engine  # register on import
     step = get_engine(engine)
     outdir.mkdir(parents=True, exist_ok=True)
 
