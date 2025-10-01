@@ -1,7 +1,8 @@
-from pathlib import Path
-import typer, json, numpy as np
-from rich.progress import Progress
 
+from __future__ import annotations
+from pathlib import Path
+import json, typer, numpy as np
+from rich.progress import Progress
 from ..runner.snapshot import run_snapshot
 from ..io.graph_config import load_graph_yaml
 from ..viz.graph import scatter_field, interpolate_to_grid
@@ -81,27 +82,20 @@ def simulate_cmd(
     outdir: Path = typer.Option("outputs/snapshot", help="Output directory"),
     plot: bool = typer.Option(True, help="Save plots"),
 ):
-    """Run a static snapshot simulation (no time-stepping)."""
     outdir.mkdir(parents=True, exist_ok=True)
-
     with Progress() as prog:
         task = prog.add_task("[cyan]Evaluating snapshot…", total=100)
         R, summary = run_snapshot(str(config))
         prog.update(task, completed=100)
-
-    # Save results
     np.savez_compressed(outdir / "residuals.npz", **R)
     (outdir / "summary.json").write_text(json.dumps(summary, indent=2))
-
     if plot:
         cfg = load_graph_yaml(config)
         nodes = cfg["space"]["nodes"]; edges = cfg["space"]["edges"]
-        pos = np.array([nd.get("pos_um", [0, 0])[:2] for nd in nodes], float)
+        pos = np.array([nd.get("pos_um", [0,0])[:2] for nd in nodes], float)
         id_to_idx = {nd["id"]: i for i, nd in enumerate(nodes)}
         edge_index = np.array([[id_to_idx[e["i"]], id_to_idx[e["j"]]] for e in edges], int)
-
         for k, arr in R.items():
             scatter_field(pos, arr, outdir / f"R_{k}_scatter.png", title=f"Residual {k} (scatter)", edges=edge_index)
-            interpolate_to_grid(pos, arr, outdir / f"R_{k}_interp.png", title=f"Residual {k} (interp)")
-
-    typer.secho("✅ Snapshot simulation finished.", fg=typer.colors.GREEN)
+            if len(pos) >= 3:
+                interpolate_to_grid(pos, arr, outdir / f"R_{k}_interp.png", title=f"Residual {k} (interp)")
