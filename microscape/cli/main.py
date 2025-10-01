@@ -14,6 +14,8 @@ from ..viz.graph import scatter_field, interpolate_to_grid
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
+# Repository URL used for updates
+REPO_URL = "git+https://github.com/anttonalberdi/microscape.git"
 
 @app.command()
 def update(
