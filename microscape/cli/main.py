@@ -93,9 +93,17 @@ def simulate_cmd(
     # Load once (also lets us resolve relative paths in future)
     cfg = load_graph_yaml(config)  # works for graph; harmless for reading 'space' key for grid later
     space_type = (cfg.get("space") or {}).get("type", "graph").lower()
+    engine = engine or ("sbml" if models_present else "toy")
+
+    if engine == "sbml":
+    from ..kinetics import sbml_engine  # register on import
 
     step = get_engine(engine)
     outdir.mkdir(parents=True, exist_ok=True)
+
+    typer.secho(f"Engine: {engine}", fg=typer.colors.CYAN)
+    if engine == "toy" and models_present:
+        typer.secho("Note: 'models:' provided but engine='toy' ignores SBML models.", fg=typer.colors.YELLOW)
 
     with Progress() as progress:
         task = progress.add_task(f"[cyan]Simulating ({space_type})…", total=100)

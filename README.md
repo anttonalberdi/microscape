@@ -17,8 +17,11 @@ microscape --help
 ### Run the synthetic demo
 
 ```bash
-microscape simulate https://raw.githubusercontent.com/anttonalberdi/microscape/refs/heads/main/examples/demo_graph/graph_demo.yml
+wget https://raw.githubusercontent.com/anttonalberdi/microscape/refs/heads/main/examples/demo1/graph_demo.yml
+microscape simulate graph_demo.yml
 ```
+
+https://github.com/anttonalberdi/microscape/tree/branch/foldername
 
 `microscape demo` runs a tiny, biologically motivated simulation on a small tissue slice:
 

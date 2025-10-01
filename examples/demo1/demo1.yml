@@ -1,0 +1,43 @@
+space:
+  type: graph
+  nodes:
+    - { id: v00, pos_um: [0,  0],  volume_nl: 0.05, region: mucosa,
+        init: { glc: 0.0, lac: 0.0, ac: 0.0, but: 0.0 },
+        guilds: { FD: 0.7, LU: 0.2, BP: 0.1 } }
+    - { id: v11, pos_um: [50, 50], volume_nl: 0.05, region: mid,
+        init: { glc: 2.0, lac: 0.0, ac: 0.0, but: 0.0 },
+        guilds: { FD: 0.5, LU: 0.4, BP: 0.1 } }
+    # ... (rest of your nodes)
+  edges:
+    - { i: v00, j: v11, weight: 0.5 }
+    # ... (rest of your edges)
+  diffusion_um2_s: { glc: 600, lac: 500, ac: 500, but: 400 }
+  decay_s:         { glc: 0.00, lac: 0.00, ac: 0.00, but: 0.00 }
+
+# Paths are relative to this YAML file (keep examples outside the package)
+models:
+  FD: FD.xml   # fibre degrader
+  LU: LU.xml   # lactate utilizer
+  BP: BP.xml   # butyrate producer
+
+# Map your fields to exchange reaction IDs in the SBML models
+metabolite_map:
+  glc: EX_glc__D_e
+  lac: EX_lac__L_e
+  ac:  EX_ac_e
+  but: EX_but_e
+
+constraints:
+  # maps concentration to uptake bound: uptake_bound = max_uptake * conc/(conc + uptake_k)
+  uptake_k:   { glc: 0.08, lac: 0.05, ac: 0.03 }  # "K" parameters per field
+  max_uptake: { glc: 10.0, lac: 8.0,  ac: 6.0  }  # vmax per field (mmol/gDW/h)
+  alpha_flux_to_dC: 0.01  # unit conversion factor (per-voxel); tune later with biomass & volume
+
+fba:
+  solver: glpk
+  objective: biomass_or_sinks
+  sink_exchanges: [EX_but_e]  # used if no biomass rxn present
+
+runtime:
+  steps: 250
+  dt_s: 2.0
