@@ -1,19 +1,10 @@
-
-from __future__ import annotations
 from pathlib import Path
-import json, typer, sys, subprocess, csv, shutil
+import typer, json, numpy as np
 from rich.progress import Progress
-import numpy as np
 
-from ..core.registry import get as get_engine
-from ..runner.simulate_graph import simulate_graph
+from ..runner.snapshot import run_snapshot
 from ..io.graph_config import load_graph_yaml
 from ..viz.graph import scatter_field, interpolate_to_grid
-
-from ..io.graph_config import load_graph_yaml
-from ..runner.snapshot import run_snapshot
-from ..runner.simulate_graph import simulate_graph  # your existing dynamic runner
-
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
