@@ -1,164 +1,140 @@
-# microscape/kinetics/sbml_engine.py
 from __future__ import annotations
-from typing import Dict, Any
-from pathlib import Path
+from typing import Dict, List
 import numpy as np
-from ..core.registry import register
+import warnings
+import cobra
+from cobra.util.solver import linear_reaction_coefficients
 
-# Lazy globals so models are loaded once per run
-_MODELS: Dict[str, Any] = {}
-_MODEL_EX_RXNS: Dict[str, Dict[str, Any]] = {}  # guild -> {ex_id: rxn}
-_FIELD_TO_EX: Dict[str, str] = {}               # e.g. "glc" -> "EX_glc__D_e"
-_SOLVER = None
+# --- public API ---
 
-def _ensure_deps():
-    try:
-        import cobra  # noqa: F401
-    except Exception as e:
-        raise RuntimeError(
-            "SBML engine requires 'cobra' (and libSBML). "
-            "Install via conda-forge: conda install -c conda-forge cobra python-libsbml"
-        ) from e
+def load_models(model_paths: Dict[str, str]) -> Dict[str, cobra.Model]:
+    """Load one SBML per guild ID; turn off solver chatter."""
+    models = {}
+    for gid, p in model_paths.items():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            m = cobra.io.read_sbml_model(p)
+        m.solver = "glpk"
+        models[gid] = m
+    return models
 
-def _load_models(cfg: dict):
-    """Load SBML models and cache exchange reactions."""
-    global _MODELS, _MODEL_EX_RXNS, _FIELD_TO_EX, _SOLVER
-    if _MODELS:  # already loaded
-        return
+def voxel_sources_from_sbml(cfg: dict, models: Dict[str, cobra.Model], C: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    """Return S_f[v]: net production (mmol->conc per unit time) per voxel using expression + Monod."""
+    nodes = cfg["space"]["nodes"]
+    fmap = cfg["metabolite_map"]                    # field -> exchange rxn id
+    fba = cfg.get("fba", {})
+    cons = cfg.get("constraints", {})
+    substrates = set(fba.get("substrates", []))
+    sinks = set(fba.get("sinks", []))
+    K = cons.get("uptake_k", {})
+    Vmax = cons.get("max_uptake", {})
+    alpha = float(cons.get("alpha_flux_to_dC", 1e-3))
 
-    _ensure_deps()
-    import cobra
-    from cobra.io import read_sbml_model
+    # prep output
+    field_names = list(fmap.keys())
+    N = len(nodes)
+    S = {f: np.zeros(N, float) for f in field_names}
 
-    models_cfg = cfg.get("models") or {}
-    if not models_cfg:
-        raise RuntimeError("SBML engine: 'models:' mapping is required in YAML.")
+    # per voxel, aggregate across guilds
+    for v, nd in enumerate(nodes):
+        guilds = nd.get("guilds", {})
+        expr_all = nd.get("expression", {})
+        # collect contributions
+        for gid, frac in guilds.items():
+            if frac <= 0: continue
+            if gid not in models: continue
+            m = models[gid]
 
-    _SOLVER = (cfg.get("fba") or {}).get("solver", "glpk")  # glpk by default
+            # reset to SBML defaults each call (avoid bound drift)
+            reset_bounds_to_sbml(m)
 
-    # field->exchange mapping used to pick exchange fluxes for tracked fields
-    fmap = (cfg.get("metabolite_map") or {})
-    if not fmap:
-        raise RuntimeError("SBML engine: 'metabolite_map:' is required (e.g. glc: EX_glc__D_e)")
-    _FIELD_TO_EX = dict(fmap)
+            # Expression -> reaction activity (light E-Flux)
+            expr = expr_all.get(gid, {})
+            apply_expression_caps(m, expr, floor=0.05)
 
-    for guild, sbml_path in models_cfg.items():
-        p = Path(sbml_path)
-        if not p.exists():
-            raise FileNotFoundError(f"SBML model not found for guild '{guild}': {p}")
-        m = read_sbml_model(str(p))
-        m.solver = _SOLVER
-        # cache exchange reactions for speed
-        ex_rxns = {}
-        for r in m.exchanges:
-            ex_rxns[r.id] = r
-        _MODELS[guild] = m
-        _MODEL_EX_RXNS[guild] = ex_rxns
+            # Clamp exchanges by local concentrations (Monod)
+            for f, ex_id in fmap.items():
+                if ex_id not in m.reactions: continue
+                rxn = m.reactions.get_by_id(ex_id)
+                # sign convention: uptake is negative (LB negative), secretion positive (UB positive)
+                if ex_id in substrates:
+                    C_loc = float(C[f][v])
+                    cap = monod_cap(C_loc, float(Vmax.get(f, 0.0)), float(K.get(f, 1.0)))
+                    rxn.lower_bound = max(-cap, rxn.lower_bound)  # ≤ 0
+                    rxn.upper_bound = min(0.0, rxn.upper_bound)   # ≤ 0
+                elif ex_id in sinks:
+                    # allow secretion; optionally cap with Vmax if provided
+                    cap = float(Vmax.get(f, 1e3))
+                    rxn.lower_bound = max(0.0, rxn.lower_bound)
+                    rxn.upper_bound = min(cap, rxn.upper_bound)
 
-def _node_guilds_for_idx(cfg: dict, idx: int) -> Dict[str, float]:
-    """Return {guild: weight} for node idx; defaults to equal mix if absent."""
-    nodes = (cfg.get("space") or {}).get("nodes") or []
-    nd = nodes[idx]
-    g = nd.get("guilds")
-    if g:
-        # normalize
-        s = float(sum(g.values()))
-        if s > 0:
-            return {k: float(v)/s for k, v in g.items()}
-    # fallback: if not provided, use all models equally
-    weights = {k: 1.0 for k in (cfg.get("models") or {}).keys()}
-    s = float(sum(weights.values()))
-    return {k: v/s for k, v in weights.items()}
+            # Objective: biomass + sinks if present
+            set_objective(m, sinks if sinks else None)
 
-def _bounds_from_conc(field_val: float, base_uptake: float, max_uptake: float) -> float:
-    """
-    Map local concentration to an uptake bound (mmol/gDW/h) with a simple saturating function.
-    You can later replace this with a calibrated mapping or transcript-informed scaling.
-    """
-    # smooth saturation: vmax * (x / (x + K)), with K derived from base_uptake
-    K = max(base_uptake, 1e-6)
-    return max_uptake * (field_val / (field_val + K))
-
-def _compute_node_exchanges(node_idx: int, fields: Dict[str, np.ndarray], cfg: dict) -> Dict[str, float]:
-    """
-    For one voxel node, compute net exchange flux for each tracked field by combining
-    guild-specific FBA solutions weighted by guild abundance.
-    Returns dict field->flux (mmol/gDW/h positive = secretion).
-    """
-    import cobra
-
-    guild_weights = _node_guilds_for_idx(cfg, node_idx)
-    constraints = (cfg.get("constraints") or {})
-    base_uptake = (constraints.get("uptake_k") or {})  # same keys as fields
-    vmax = (constraints.get("max_uptake") or {})       # optional per field
-
-    # aggregate flux over guilds
-    agg_flux = {f: 0.0 for f in fields.keys()}
-
-    for guild, w in guild_weights.items():
-        model = _MODELS[guild]
-        ex_rxns = _MODEL_EX_RXNS[guild]
-
-        with model:
-            # set objective — growth if present else total secretion of tracked sinks
-            obj = (cfg.get("fba") or {}).get("objective", "biomass_or_sinks")
-            if obj == "biomass_or_sinks":
-                biomass = next((r for r in model.reactions if "biomass" in r.id.lower()), None)
-                if biomass is not None:
-                    model.objective = biomass
-                else:
-                    # sum secretion of known sinks (e.g., butyrate, propionate)
-                    sinks = (cfg.get("fba") or {}).get("sink_exchanges", [])
-                    model.objective = cobra.Objective(
-                        sum(ex_rxns[s] for s in sinks if s in ex_rxns), direction="max"
-                    )
-            elif obj == "custom":
-                # advanced: user can specify a linear expression, skip here
-                pass
-
-            # set uptake bounds from local concentrations
-            for field, conc in fields.items():
-                ex_id = _FIELD_TO_EX.get(field)
-                if not ex_id or ex_id not in ex_rxns:
-                    continue
-                rxn = ex_rxns[ex_id]
-                # COBRA convention: uptake is negative flux; set lower bound negative
-                base = float(base_uptake.get(field, 0.05))
-                vmax_f = float(vmax.get(field, 10.0))
-                uptake_bound = _bounds_from_conc(float(conc[node_idx]), base, vmax_f)
-                rxn.lower_bound = -uptake_bound  # allow uptake up to bound
-                # leave rxn.upper_bound default (secretion allowed)
-
-            sol = model.optimize()
-            if sol.status != "optimal":
-                # if infeasible, skip contribution
+            sol = m.optimize()
+            if not sol or sol.status != "optimal":
                 continue
 
-            # collect exchange fluxes for tracked fields
-            for field in agg_flux.keys():
-                ex_id = _FIELD_TO_EX.get(field)
-                if not ex_id or ex_id not in ex_rxns:
-                    continue
-                fval = float(sol.fluxes.get(ex_id, 0.0))
-                agg_flux[field] += w * fval
+            # collect exchange fluxes
+            for f, ex_id in fmap.items():
+                if ex_id in m.reactions:
+                    flx = sol.fluxes.get(ex_id, 0.0)  # mmol gDW^-1 h^-1
+                    S[f][v] += alpha * frac * flx     # scale by abundance and unit conv.
 
-    return agg_flux  # mmol/gDW/h (positive secretion, negative uptake)
+    return S
 
-@register("sbml")
-def step(fields: dict, cfg: dict, dt: float, alpha: float) -> dict:
+# --- helpers ---
+
+def reset_bounds_to_sbml(model: cobra.Model):
+    """Reset reaction bounds to SBML-declared defaults; requires latest cobra to keep original bounds."""
+    for r in model.reactions:
+        if r.lower_bound > r.upper_bound:
+            r.lower_bound, r.upper_bound = r.upper_bound, r.lower_bound
+
+def monod_cap(C: float, Vmax: float, K: float) -> float:
+    if Vmax <= 0.0: return 0.0
+    if C <= 0.0: return 0.0
+    if K <= 0.0: return Vmax
+    return Vmax * (C / (K + C))
+
+def apply_expression_caps(model: cobra.Model, expr: Dict[str, float], floor: float = 0.05):
     """
-    Convert per-node exchange fluxes (mmol/gDW/h) to dC/dt per voxel field.
-    'alpha' can bundle unit conversions (gDW per voxel, voxel volume, etc.).
+    Minimal 'E-Flux' style: if gens are linked by reaction ID (same names),
+    scale UB/LB by activity in [floor,1]. If no match, leave as-is.
+    You can replace with full GPR parsing later.
     """
-    _load_models(cfg)
-    n = len(next(iter(fields.values())))  # number of nodes
-    dC = {k: np.zeros(n, dtype=float) for k in fields.keys()}
+    if not expr: return
+    # normalize to [0,1] via ranks
+    vals = np.array(list(expr.values()), float)
+    ranks = np.argsort(np.argsort(vals))
+    A = {g: max(float(r)/max(len(vals)-1,1), floor) for g, r in zip(expr.keys(), ranks)}
+    for rid, act in A.items():
+        if rid in model.reactions:
+            rxn = model.reactions.get_by_id(rid)
+            scale_bounds(rxn, act, floor)
 
-    # Per-node compute
-    for i in range(n):
-        ex = _compute_node_exchanges(i, fields, cfg)  # mmol/gDW/h
-        for field, v in ex.items():
-            # map flux to concentration change: dC = alpha * flux
-            dC[field][i] += alpha * v
+def scale_bounds(rxn, a: float, floor: float):
+    lb, ub = rxn.lower_bound, rxn.upper_bound
+    if lb >= 0:            # irreversible forward
+        rxn.upper_bound = ub * a
+    elif ub <= 0:          # irreversible backward
+        rxn.lower_bound = lb * a
+    else:                  # reversible
+        rxn.lower_bound = lb * a
+        rxn.upper_bound = ub * a
 
-    return dC
+def set_objective(model: cobra.Model, sink_ids: List[str] | None):
+    # biomass reactions are heuristically recognised by name/id
+    biomass = [r for r in model.reactions if "biomass" in r.id.lower()]
+    coeffs = {}
+    for r in biomass:
+        coeffs[r] = 1.0
+    if sink_ids:
+        for sid in sink_ids:
+            if sid in model.reactions:
+                coeffs[model.reactions.get_by_id(sid)] = 1.0
+    if coeffs:
+        model.objective = coeffs
+    else:
+        # fallback: keep model's default objective
+        pass

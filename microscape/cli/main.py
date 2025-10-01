@@ -81,62 +81,31 @@ def update(
 
 @app.command("simulate")
 def simulate_cmd(
-    config: Path = typer.Argument(..., help="YAML config (space: graph; SBML models required)"),
-    outdir: Path = typer.Option("outputs/run", help="Output directory"),
+    config: Path = typer.Argument(..., help="Graph YAML config"),
+    outdir: Path = typer.Option("outputs/snapshot", help="Output directory"),
     plot: bool = typer.Option(True, help="Save plots"),
 ):
-    """
-    General simulation entrypoint (SBML/COBRA backend only).
-    - Expects: space.type: graph
-               models: { guild: /path/to/model.xml, ... }
-               metabolite_map: { field: exchange_rxn_id, ... }
-    """
-    # Load config (also resolves relative paths in your loader)
-    cfg = load_graph_yaml(config)
-    space_type = (cfg.get("space") or {}).get("type", "graph").lower()
-
-    # Validate required SBML blocks
-    models_present = bool((cfg.get("models") or {}))
-    fmap_present = bool((cfg.get("metabolite_map") or {}))
-    if not models_present:
-        raise typer.BadParameter(
-            "SBML engine requires 'models:' in the YAML (guild -> SBML path)."
-        )
-    if not fmap_present:
-        raise typer.BadParameter(
-            "SBML engine requires 'metabolite_map:' in the YAML (field -> exchange reaction ID)."
-        )
-
-    # Import SBML engine (registers on import) and fetch step
-    from ..kinetics import sbml_engine  # noqa: F401 (ensures registration)
-    step = get_engine("sbml")
-
+    """Run a static snapshot simulation (no time-stepping)."""
     outdir.mkdir(parents=True, exist_ok=True)
-    typer.secho("Engine: sbml (COBRA/libSBML)", fg=typer.colors.CYAN)
 
-    with Progress() as progress:
-        task = progress.add_task(f"[cyan]Simulating ({space_type})…", total=100)
-        cb = lambda i, total: progress.update(task, completed=min(i, 100))
+    with Progress() as prog:
+        task = prog.add_task("[cyan]Evaluating snapshot…", total=100)
+        R, summary = run_snapshot(str(config))
+        prog.update(task, completed=100)
 
-        if space_type == "graph":
-            fields, summary = simulate_graph(str(config), step, progress=cb)
-        else:
-            raise typer.BadParameter(
-                f"Unsupported space.type '{space_type}'. Currently supported: 'graph'."
-            )
-
-    # Save outputs
-    np.savez_compressed(outdir / "fields.npz", **fields)
+    # Save results
+    np.savez_compressed(outdir / "residuals.npz", **R)
     (outdir / "summary.json").write_text(json.dumps(summary, indent=2))
 
-    # Optional plotting (graph)
-    if plot and space_type == "graph":
+    if plot:
+        cfg = load_graph_yaml(config)
         nodes = cfg["space"]["nodes"]; edges = cfg["space"]["edges"]
         pos = np.array([nd.get("pos_um", [0, 0])[:2] for nd in nodes], float)
         id_to_idx = {nd["id"]: i for i, nd in enumerate(nodes)}
         edge_index = np.array([[id_to_idx[e["i"]], id_to_idx[e["j"]]] for e in edges], int)
-        for k, arr in fields.items():
-            scatter_field(pos, arr, outdir / f"{k}_scatter.png", title=f"{k} (scatter)", edges=edge_index)
-            interpolate_to_grid(pos, arr, outdir / f"{k}_interp.png", title=f"{k} (interp)")
 
-    typer.secho("✅ Done.", fg=typer.colors.GREEN)
+        for k, arr in R.items():
+            scatter_field(pos, arr, outdir / f"R_{k}_scatter.png", title=f"Residual {k} (scatter)", edges=edge_index)
+            interpolate_to_grid(pos, arr, outdir / f"R_{k}_interp.png", title=f"Residual {k} (interp)")
+
+    typer.secho("✅ Snapshot simulation finished.", fg=typer.colors.GREEN)
