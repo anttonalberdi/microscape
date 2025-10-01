@@ -1,32 +1,19 @@
 
 from __future__ import annotations
-import json, subprocess, sys, typer, csv, shutil
 from pathlib import Path
-import typer, numpy as np
+import json
+import typer
 from rich.progress import Progress
-import importlib.resources as ir
+import numpy as np
 
-from microscape.utils.resources import get_packaged_example
-from ..coupling.loop import run_minimal, compute_summary, save_summary_csv
-from ..io import sdp as sdpio
-from ..viz.plotting import save_heatmap, save_profile
+from ..core.registry import get as get_engine
+from ..kinetics import toy_chain  # ensure "toy" is registered
+from ..runner.simulate_graph import simulate_graph
+from ..io.graph_config import load_graph_yaml
+from ..viz.graph import scatter_field, interpolate_to_grid
 
-app = typer.Typer(add_completion=False)
-REPO_URL = "git+https://github.com/anttonalberdi/microscape.git"
+app = typer.Typer(add_completion=False, no_args_is_help=True)
 
-@app.command()
-def validate_sdp(path: str):
-    """Validate a Spatial Data Package (SDP)."""
-    schema = sdpio.validate_sdp(path)
-    typer.echo(json.dumps(schema.model_dump(), indent=2))
-
-@app.command()
-def simulate(config: str = typer.Argument(None), out: str = "outputs/run_001.npz"):
-    """Run a minimal synthetic simulation demo (placeholder for config-driven runs)."""
-    Path(Path(out).parent).mkdir(parents=True, exist_ok=True)
-    res = run_minimal()
-    np.savez_compressed(out, **res)
-    typer.echo(f"Saved results to {out}")
 
 @app.command()
 def update(
@@ -91,100 +78,38 @@ def update(
             typer.echo("   • microscape update --with-deps")
             typer.echo("   • microscape update --verbose   # to see full pip logs")
         raise typer.Exit(code=e.returncode)
-    
 
-@app.command()
-def demo(outdir: str = "outputs/demo_001", plot: bool = typer.Option(True, help="Save PNG plots")):
-    """
-    Run the built-in synthetic demo and produce user-friendly outputs:
-    - fields.npz            (butyrate, fibre, mucosa_mask)
-    - summary.csv           (means, SCFA at mucosa)
-    - butyrate.png          (heatmap)
-    - radial_profile.png    (butyrate vs distance from mucosa)
-    """
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    typer.echo("🔧 Initialising demo (fibre → butyrate on a small tissue slice)…")
-
-    # Progress bar for the simulation loop
-    steps = 200
-    with Progress() as progress:
-        task = progress.add_task("[cyan]Simulating diffusion & production…", total=steps)
-        def cb(i, total):
-            progress.update(task, completed=i)
-        res = run_minimal(sim_steps=steps, dt=5.0, voxel_um=10.0, progress_cb=cb)
-
-    typer.echo("🧮 Computing summaries (SCFA-at-mucosa, radial profile)…")
-    summary = compute_summary(res["butyrate"], res["mucosa_mask"])
-
-    typer.echo("💾 Writing outputs (arrays, CSV, plots)…")
-    fields_npz = outdir / "fields.npz"
-    np.savez_compressed(fields_npz, **res)
-    save_summary_csv(summary, outdir / "summary.csv")
-
-    if plot:
-        save_heatmap(res["butyrate"], outdir / "butyrate.png", title="Butyrate (a.u.)")
-        save_heatmap(res["fibre"], outdir / "fibre.png", title="Fibre", cmap="magma")
-        save_profile(summary["profile_dist_px"], summary["profile_mean"], outdir / "radial_profile.png",
-                     title="Butyrate vs distance from mucosa")
-
-    typer.echo("✅ Demo complete.")
-    typer.echo(f"   • Arrays:   {fields_npz}")
-    typer.echo(f"   • Summary:  {outdir/'summary.csv'}")
-    if plot:
-        typer.echo(f"   • Plots:    {outdir/'butyrate.png'}, {outdir/'radial_profile.png'}")
-
-@app.command("demo2")
-def demo2(
-    config: str = typer.Option(None, help="YAML config for the SBML/dFBA demo"),
-    outdir: str = typer.Option("outputs/demo2_gsmm", help="Output directory"),
-    plot: bool = typer.Option(True, help="Save PNG heatmaps"),
+@app.command("simulate-graph")
+def simulate_graph_cmd(
+    config: Path = typer.Argument(..., help="Graph YAML config"),
+    engine: str = typer.Option("toy", help="Engine: toy"),
+    outdir: Path = typer.Option("outputs/run_graph", help="Output directory"),
+    plot: bool = typer.Option(True, help="Save plots"),
 ):
-    # Lazy import so other commands work even if GSMM deps not present
-    try:
-        from ..coupling.loop_gsmm import run_demo_gsmm
-    except Exception as e:
-        typer.secho(
-            f"GSMM demo unavailable ({e}). Ensure 'microscape/coupling/loop_gsmm.py' exists.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(code=1)
-
-    # Default config: packaged demo2 config
-    if config is None:
-        try:
-            from ..utils.resources import get_packaged_path
-            config = get_packaged_path("examples/demo2/community_sbml.yml")
-        except Exception:
-            # fallback to source tree
-            config = "examples/demo2/community_sbml.yml"
-
-    out = Path(outdir); out.mkdir(parents=True, exist_ok=True)
-    typer.echo("🔧 Initialising Demo 2 (GSMM via SBML)…")
-
+    step = get_engine(engine)
+    outdir.mkdir(parents=True, exist_ok=True)
     with Progress() as progress:
-        task = progress.add_task("[cyan]Simulating…", total=100)
-        def cb(i, total): progress.update(task, completed=min(i, 100))
-
-        # **Correct call** (avoid demo2(...) recursion)
-        fields, summary = run_demo_gsmm(config, out, progress_cb=cb)
-
-    # Save arrays
-    np.savez_compressed(out / "fields.npz", **fields)
-
-    # Save a tiny CSV summary
-    with open(out / "summary.csv", "w", newline="") as f:
-        w = csv.writer(f); w.writerow(["metric", "value"])
-        for k, v in summary.items(): w.writerow([k, v])
-
-    # Optional plots (if your viz helper exists)
+        task = progress.add_task("[cyan]Simulating graph…", total=100)
+        cb = lambda i, total: progress.update(task, completed=min(i, 100))
+        fields, summary = simulate_graph(str(config), step, progress=cb)
+    np.savez_compressed(outdir / "fields.npz", **fields)
+    (outdir / "summary.json").write_text(json.dumps(summary, indent=2))
     if plot:
-        try:
-            from ..viz.plotting import save_heatmap
-            for k in ("glc", "lac", "ac", "but"):
-                if k in fields: save_heatmap(fields[k], out / f"{k}.png", title=k.upper())
-        except Exception as e:
-            typer.echo(f"(plotting skipped: {e})")
+        cfg = load_graph_yaml(config)
+        nodes = cfg["space"]["nodes"]; edges = cfg["space"]["edges"]
+        pos = np.array([nd.get("pos_um", [0,0])[:2] for nd in nodes], float)
+        id_to_idx = {nd["id"]: i for i, nd in enumerate(nodes)}
+        edge_index = np.array([[id_to_idx[e["i"]], id_to_idx[e["j"]]] for e in edges], int)
+        for k, arr in fields.items():
+            scatter_field(pos, arr, outdir / f"{k}_scatter.png", title=f"{k} (scatter)", edges=edge_index)
+            interpolate_to_grid(pos, arr, outdir / f"{k}_interp.png", title=f"{k} (interp)")
+    typer.secho("✅ Done.", fg=typer.colors.GREEN)
 
-    typer.echo("✅ Demo 2 complete.")
+@app.command("demo-graph")
+def demo_graph(
+    outdir: Path = typer.Option("outputs/demo_graph", help="Output directory"),
+    plot: bool = typer.Option(True, help="Save plots"),
+):
+    here = Path(__file__).resolve().parents[2]
+    cfg = here / "examples" / "demo_graph" / "graph_demo.yml"
+    simulate_graph_cmd(config=cfg, engine="toy", outdir=outdir, plot=plot)

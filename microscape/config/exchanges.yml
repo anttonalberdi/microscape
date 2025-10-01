@@ -1,5 +1,0 @@
-fields_to_exchanges:
-  glc: EX_glc__D_e
-  lac: EX_lac__L_e
-  ac:  EX_ac_e
-  but: EX_but_e
