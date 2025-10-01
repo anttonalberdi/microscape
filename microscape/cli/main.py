@@ -10,6 +10,11 @@ from ..runner.simulate_graph import simulate_graph
 from ..io.graph_config import load_graph_yaml
 from ..viz.graph import scatter_field, interpolate_to_grid
 
+from ..io.graph_config import load_graph_yaml
+from ..runner.snapshot import run_snapshot
+from ..runner.simulate_graph import simulate_graph  # your existing dynamic runner
+
+
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 # Repository URL used for updates
