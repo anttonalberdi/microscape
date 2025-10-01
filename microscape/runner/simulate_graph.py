@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict, Tuple, Callable
 import numpy as np
 from ..io.graph_config import parse_graph, load_graph_yaml
-from ..space.graph import build_laplacians, explicit_diffusion_step, stable_dt_upper_bound
+from microscape.space import build_laplacians, explicit_diffusion_step, stable_dt_upper_bound
 
 KineticsStep = Callable[[Dict[str, np.ndarray], dict, float, float], Dict[str, np.ndarray]]
 
