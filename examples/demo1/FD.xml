@@ -1,60 +1,59 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <sbml xmlns="http://www.sbml.org/sbml/level3/version1/core"
       xmlns:fbc="http://www.sbml.org/sbml/level3/version1/fbc/version2"
-      level="3" version="1" fbc:required="true">
+      level="3" version="1" fbc:required="true" fbc:strict="true">
   <model id="FD" name="FD">
-    <listOfFunctionDefinitions/>
-    <listOfUnitDefinitions/>
     <listOfCompartments>
-      <compartment id="e" name="extracellular" constant="true"/>
-      <compartment id="c" name="cytosol" constant="true"/>
+      <compartment id="c" name="cytosol" constant="true" size="1"/>
+      <compartment id="e" name="extracellular" constant="true" size="1"/>
     </listOfCompartments>
-    <listOfParameters/>
     <listOfSpecies>
-      <species id="glc__D_e" name="D-Glucose [e]" compartment="e" initialAmount="0" boundaryCondition="true" hasOnlySubstanceUnits="false" constant="false"/>
-      <species id="glc__D_c" name="D-Glucose [c]" compartment="c" initialAmount="0" boundaryCondition="false" hasOnlySubstanceUnits="false" constant="false"/>
-      <species id="lac__L_e" name="L-Lactate [e]" compartment="e" initialAmount="0" boundaryCondition="true" hasOnlySubstanceUnits="false" constant="false"/>
-      <species id="lac__L_c" name="L-Lactate [c]" compartment="c" initialAmount="0" boundaryCondition="false" hasOnlySubstanceUnits="false" constant="false"/>
-      <species id="ac_e" name="Acetate [e]" compartment="e" initialAmount="0" boundaryCondition="true" hasOnlySubstanceUnits="false" constant="false"/>
-      <species id="ac_c" name="Acetate [c]" compartment="c" initialAmount="0" boundaryCondition="false" hasOnlySubstanceUnits="false" constant="false"/>
-      <species id="biomass_c" name="Biomass [c]" compartment="c" initialAmount="0" boundaryCondition="false" hasOnlySubstanceUnits="false" constant="false"/>
+      <species id="glc__D_e" name="D-Glucose (e)" compartment="e" initialAmount="0" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
+      <species id="lac__L_e" name="L-Lactate (e)" compartment="e" initialAmount="0" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
+      <species id="ac_e" name="Acetate (e)" compartment="e" initialAmount="0" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
+      <species id="glc__D_c" name="D-Glucose (c)" compartment="c" initialAmount="0" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
+      <species id="lac__L_c" name="L-Lactate (c)" compartment="c" initialAmount="0" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
+      <species id="ac_c" name="Acetate (c)" compartment="c" initialAmount="0" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
+      <species id="biomass_c" name="Biomass (c)" compartment="c" initialAmount="0" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
     </listOfSpecies>
+    <listOfParameters>
+      <parameter id="LB_EX_glc__D_e" value="-10" constant="true" fbc:type="lowerFluxBound"/>
+      <parameter id="UB_EX_glc__D_e" value="0" constant="true" fbc:type="upperFluxBound"/>
+      <parameter id="LB_EX_lac__L_e" value="0" constant="true" fbc:type="lowerFluxBound"/>
+      <parameter id="UB_EX_lac__L_e" value="1000" constant="true" fbc:type="upperFluxBound"/>
+      <parameter id="LB_EX_ac_e" value="0" constant="true" fbc:type="lowerFluxBound"/>
+      <parameter id="UB_EX_ac_e" value="1000" constant="true" fbc:type="upperFluxBound"/>
+      <parameter id="LB_T_glc" value="0" constant="true" fbc:type="lowerFluxBound"/>
+      <parameter id="UB_T_glc" value="1000" constant="true" fbc:type="upperFluxBound"/>
+      <parameter id="LB_T_lac" value="0" constant="true" fbc:type="lowerFluxBound"/>
+      <parameter id="UB_T_lac" value="1000" constant="true" fbc:type="upperFluxBound"/>
+      <parameter id="LB_T_ac" value="0" constant="true" fbc:type="lowerFluxBound"/>
+      <parameter id="UB_T_ac" value="1000" constant="true" fbc:type="upperFluxBound"/>
+      <parameter id="LB_FER" value="0" constant="true" fbc:type="lowerFluxBound"/>
+      <parameter id="UB_FER" value="1000" constant="true" fbc:type="upperFluxBound"/>
+      <parameter id="LB_BIOMASS_FD" value="0" constant="true" fbc:type="lowerFluxBound"/>
+      <parameter id="UB_BIOMASS_FD" value="1000" constant="true" fbc:type="upperFluxBound"/>
+    </listOfParameters>
     <listOfReactions>
-      <reaction id="EX_glc__D_e" name="Exchange D-Glucose (e)" reversible="true">
-        <fbc:fluxBounds>
-          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="EX_glc__D_e" fbc:value="-1000"/>
-          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="EX_glc__D_e" fbc:value="1000"/>
-        </fbc:fluxBounds>
+      <reaction id="EX_glc__D_e" name="Exchange D-Glucose (e)" reversible="false" fbc:lowerFluxBound="LB_EX_glc__D_e" fbc:upperFluxBound="UB_EX_glc__D_e">
         <listOfReactants>
           <speciesReference species="glc__D_e" stoichiometry="1"/>
         </listOfReactants>
-        <listOfProducts/>
       </reaction>
-      <reaction id="EX_lac__L_e" name="Exchange L-Lactate (e)" reversible="true">
-        <fbc:fluxBounds>
-          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="EX_lac__L_e" fbc:value="-1000"/>
-          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="EX_lac__L_e" fbc:value="1000"/>
-        </fbc:fluxBounds>
+
+      <reaction id="EX_lac__L_e" name="Exchange L-Lactate (e)" reversible="false" fbc:lowerFluxBound="LB_EX_lac__L_e" fbc:upperFluxBound="UB_EX_lac__L_e">
         <listOfReactants>
           <speciesReference species="lac__L_e" stoichiometry="1"/>
         </listOfReactants>
-        <listOfProducts/>
       </reaction>
-      <reaction id="EX_ac_e" name="Exchange Acetate (e)" reversible="true">
-        <fbc:fluxBounds>
-          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="EX_ac_e" fbc:value="-1000"/>
-          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="EX_ac_e" fbc:value="1000"/>
-        </fbc:fluxBounds>
+
+      <reaction id="EX_ac_e" name="Exchange Acetate (e)" reversible="false" fbc:lowerFluxBound="LB_EX_ac_e" fbc:upperFluxBound="UB_EX_ac_e">
         <listOfReactants>
           <speciesReference species="ac_e" stoichiometry="1"/>
         </listOfReactants>
-        <listOfProducts/>
       </reaction>
-      <reaction id="T_glc" name="Transport glucose e->c" reversible="false">
-        <fbc:fluxBounds>
-          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="T_glc" fbc:value="0"/>
-          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="T_glc" fbc:value="1000"/>
-        </fbc:fluxBounds>
+
+      <reaction id="T_glc" name="Transport glucose e->c" reversible="false" fbc:lowerFluxBound="LB_T_glc" fbc:upperFluxBound="UB_T_glc">
         <listOfReactants>
           <speciesReference species="glc__D_e" stoichiometry="1"/>
         </listOfReactants>
@@ -62,11 +61,8 @@
           <speciesReference species="glc__D_c" stoichiometry="1"/>
         </listOfProducts>
       </reaction>
-      <reaction id="T_lac" name="Transport lactate c->e" reversible="false">
-        <fbc:fluxBounds>
-          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="T_lac" fbc:value="0"/>
-          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="T_lac" fbc:value="1000"/>
-        </fbc:fluxBounds>
+
+      <reaction id="T_lac" name="Transport lactate c->e" reversible="false" fbc:lowerFluxBound="LB_T_lac" fbc:upperFluxBound="UB_T_lac">
         <listOfReactants>
           <speciesReference species="lac__L_c" stoichiometry="1"/>
         </listOfReactants>
@@ -74,11 +70,8 @@
           <speciesReference species="lac__L_e" stoichiometry="1"/>
         </listOfProducts>
       </reaction>
-      <reaction id="T_ac" name="Transport acetate c->e" reversible="false">
-        <fbc:fluxBounds>
-          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="T_ac" fbc:value="0"/>
-          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="T_ac" fbc:value="1000"/>
-        </fbc:fluxBounds>
+
+      <reaction id="T_ac" name="Transport acetate c->e" reversible="false" fbc:lowerFluxBound="LB_T_ac" fbc:upperFluxBound="UB_T_ac">
         <listOfReactants>
           <speciesReference species="ac_c" stoichiometry="1"/>
         </listOfReactants>
@@ -86,38 +79,28 @@
           <speciesReference species="ac_e" stoichiometry="1"/>
         </listOfProducts>
       </reaction>
-      <reaction id="FER" name="Glucose fermentation" reversible="false">
-        <fbc:fluxBounds>
-          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="FER" fbc:value="0"/>
-          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="FER" fbc:value="1000"/>
-        </fbc:fluxBounds>
+
+      <reaction id="FER" name="Glucose fermentation" reversible="false" fbc:lowerFluxBound="LB_FER" fbc:upperFluxBound="UB_FER">
         <listOfReactants>
           <speciesReference species="glc__D_c" stoichiometry="1"/>
         </listOfReactants>
         <listOfProducts>
-          <speciesReference species="lac__L_c" stoichiometry="0.6"/>
-          <speciesReference species="ac_c" stoichiometry="0.4"/>
+          <speciesReference species="lac__L_c" stoichiometry="1.5"/>
+          <speciesReference species="ac_c" stoichiometry="0.5"/>
         </listOfProducts>
       </reaction>
-      <reaction id="BIOMASS_FD" name="Biomass drain FD" reversible="false">
-        <fbc:fluxBounds>
-          <fbc:fluxBound fbc:operation="greaterEqual" fbc:reaction="BIOMASS_FD" fbc:value="0"/>
-          <fbc:fluxBound fbc:operation="lessEqual" fbc:reaction="BIOMASS_FD" fbc:value="1000"/>
-        </fbc:fluxBounds>
+
+      <reaction id="BIOMASS_FD" name="Biomass drain FD" reversible="false" fbc:lowerFluxBound="LB_BIOMASS_FD" fbc:upperFluxBound="UB_BIOMASS_FD">
         <listOfReactants>
-          <speciesReference species="glc__D_c" stoichiometry="0.01"/>
+          <speciesReference species="glc__D_c" stoichiometry="0.05"/>
+          <speciesReference species="ac_c" stoichiometry="0.05"/>
+          <speciesReference species="lac__L_c" stoichiometry="0.05"/>
         </listOfReactants>
         <listOfProducts>
-          <speciesReference species="biomass_c" stoichiometry="1"/>
+          <speciesReference species="biomass_c" stoichiometry="0.05"/>
         </listOfProducts>
       </reaction>
+
     </listOfReactions>
-<fbc:listOfObjectives fbc:activeObjective="obj">
-  <fbc:objective fbc:id="obj" fbc:type="maximize">
-    <fbc:listOfFluxObjectives>
-      <fbc:fluxObjective fbc:reaction="BIOMASS_FD" fbc:coefficient="1.0"/>
-    </fbc:listOfFluxObjectives>
-  </fbc:objective>
-</fbc:listOfObjectives>
   </model>
 </sbml>
