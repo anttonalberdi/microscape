@@ -79,37 +79,47 @@ def update(
             typer.echo("   • microscape update --verbose   # to see full pip logs")
         raise typer.Exit(code=e.returncode)
 
-@app.command("simulate-graph")
-def simulate_graph_cmd(
-    config: Path = typer.Argument(..., help="Graph YAML config"),
-    engine: str = typer.Option("toy", help="Engine: toy"),
-    outdir: Path = typer.Option("outputs/run_graph", help="Output directory"),
+@app.command("simulate")
+def simulate_cmd(
+    config: Path = typer.Argument(..., help="YAML config (graph or grid)"),
+    engine: str = typer.Option("toy", help="Engine: toy (others can be added later)"),
+    outdir: Path = typer.Option("outputs/run", help="Output directory"),
     plot: bool = typer.Option(True, help="Save plots"),
 ):
+    """
+    General simulation entrypoint. Dispatches on space.type in the YAML.
+    """
+    # Load once (also lets us resolve relative paths in future)
+    cfg = load_graph_yaml(config)  # works for graph; harmless for reading 'space' key for grid later
+    space_type = (cfg.get("space") or {}).get("type", "graph").lower()
+
     step = get_engine(engine)
     outdir.mkdir(parents=True, exist_ok=True)
+
     with Progress() as progress:
-        task = progress.add_task("[cyan]Simulating graph…", total=100)
+        task = progress.add_task(f"[cyan]Simulating ({space_type})…", total=100)
         cb = lambda i, total: progress.update(task, completed=min(i, 100))
-        fields, summary = simulate_graph(str(config), step, progress=cb)
+
+        if space_type == "graph":
+            fields, summary = simulate_graph(str(config), step, progress=cb)
+        else:
+            raise typer.BadParameter(
+                f"Unsupported space.type '{space_type}'. "
+                "Currently supported: 'graph'."
+            )
+
+    # Save outputs
     np.savez_compressed(outdir / "fields.npz", **fields)
     (outdir / "summary.json").write_text(json.dumps(summary, indent=2))
-    if plot:
-        cfg = load_graph_yaml(config)
+
+    # Optional plotting (graph)
+    if plot and space_type == "graph":
         nodes = cfg["space"]["nodes"]; edges = cfg["space"]["edges"]
-        pos = np.array([nd.get("pos_um", [0,0])[:2] for nd in nodes], float)
+        pos = np.array([nd.get("pos_um", [0, 0])[:2] for nd in nodes], float)
         id_to_idx = {nd["id"]: i for i, nd in enumerate(nodes)}
         edge_index = np.array([[id_to_idx[e["i"]], id_to_idx[e["j"]]] for e in edges], int)
         for k, arr in fields.items():
             scatter_field(pos, arr, outdir / f"{k}_scatter.png", title=f"{k} (scatter)", edges=edge_index)
             interpolate_to_grid(pos, arr, outdir / f"{k}_interp.png", title=f"{k} (interp)")
-    typer.secho("✅ Done.", fg=typer.colors.GREEN)
 
-@app.command("demo-graph")
-def demo_graph(
-    outdir: Path = typer.Option("outputs/demo_graph", help="Output directory"),
-    plot: bool = typer.Option(True, help="Save plots"),
-):
-    here = Path(__file__).resolve().parents[2]
-    cfg = here / "examples" / "demo_graph" / "graph_demo.yml"
-    simulate_graph_cmd(config=cfg, engine="toy", outdir=outdir, plot=plot)
+    typer.secho("✅ Done.", fg=typer.colors.GREEN)

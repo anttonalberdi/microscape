@@ -31,6 +31,9 @@ calib = ["sbi", "torch"]
 [project.scripts]
 microscape = "microscape.cli.main:app"
 
+[tool.setuptools.package-data]
+microscape = ["examples/**"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["microscape"]
 
