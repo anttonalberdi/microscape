@@ -6,7 +6,6 @@ from rich.progress import Progress
 import numpy as np
 
 from ..core.registry import get as get_engine
-from ..kinetics import toy_chain  # ensure "toy" is registered
 from ..runner.simulate_graph import simulate_graph
 from ..io.graph_config import load_graph_yaml
 from ..viz.graph import scatter_field, interpolate_to_grid
