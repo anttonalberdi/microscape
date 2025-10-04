@@ -1,12 +1,16 @@
+# microscape/io/system_loader.py
 from __future__ import annotations
 from pathlib import Path
 from typing import List, Dict, Tuple, Any
 import yaml
 
-# ---------- helpers ----------
+# ----------------------
+# Basic YAML + path utils
+# ----------------------
 
 def _read_yaml(p: Path) -> dict:
-    return yaml.safe_load(p.read_text())
+    with p.open("r", encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
 
 def _resolve(base: Path, maybe: str | Path | None) -> Path | None:
     if not maybe:
@@ -14,12 +18,15 @@ def _resolve(base: Path, maybe: str | Path | None) -> Path | None:
     p = Path(maybe)
     return p if p.is_absolute() else (base / p)
 
-# ---------- loaders ----------
+# ----------------------
+# Public loader functions
+# ----------------------
 
 def load_system(system_yml: Path) -> dict:
     """
-    Load system.yml and resolve key paths relative to the directory containing system.yml.
-    Returns:
+    Load system.yml and resolve all key paths relative to the directory containing system.yml.
+
+    Returns a dict:
       {
         "root": Path,                    # directory of system.yml
         "system": dict,                  # parsed 'system' section
@@ -31,6 +38,7 @@ def load_system(system_yml: Path) -> dict:
         },
         "ecology_cfg": Path|None,        # resolved ecology config (if provided)
         "environment_files": [Path],     # resolved environment YAMLs
+        "microbe_files": [Path],         # resolved microbe YAMLs (if registry provided)
       }
     """
     system_yml = Path(system_yml).resolve()
@@ -50,9 +58,7 @@ def load_system(system_yml: Path) -> dict:
 
     # Resolve ecology rules (relative to config_dir unless absolute)
     ecology_rel = (sysd.get("config") or {}).get("ecology")
-    ecology_cfg = None
-    if ecology_rel:
-        ecology_cfg = _resolve(config_dir, ecology_rel)
+    ecology_cfg = _resolve(config_dir, ecology_rel) if ecology_rel else None
 
     # Resolve environment files from registry (supports {id,file} or plain strings)
     env_specs = (sysd.get("registry") or {}).get("environments") or []
@@ -60,29 +66,47 @@ def load_system(system_yml: Path) -> dict:
     if env_specs:
         for item in env_specs:
             if isinstance(item, str):
-                # "E001" or "E001.yml"
                 f = f"{item}.yml" if not item.endswith(".yml") else item
                 env_files.append((_resolve(envs_dir, f) or Path(f)).resolve())
             elif isinstance(item, dict):
-                fid = item.get("file") or f"{item.get('id')}.yml"
-                env_files.append((_resolve(envs_dir, fid) or Path(fid)).resolve())
+                fid = item.get("file") or (f"{item.get('id')}.yml" if item.get("id") else None)
+                if fid:
+                    env_files.append((_resolve(envs_dir, fid) or Path(fid)).resolve())
     else:
         env_files = sorted(envs_dir.glob("*.yml"))
 
-    # Keep only existing files
     env_files = [p for p in env_files if p.exists()]
+
+    # Resolve microbe files from registry (supports {id,file} or strings)
+    mic_specs = (sysd.get("registry") or {}).get("microbes") or []
+    mic_files: List[Path] = []
+    if mic_specs:
+        for item in mic_specs:
+            if isinstance(item, str):
+                f = f"{item}.yml" if not item.endswith(".yml") else item
+                mic_files.append((_resolve(microbes_dir, f) or Path(f)).resolve())
+            elif isinstance(item, dict):
+                fid = item.get("file") or (f"{item.get('id')}.yml" if item.get("id") else None)
+                if fid:
+                    mic_files.append((_resolve(microbes_dir, fid) or Path(fid)).resolve())
+    else:
+        # Optional: if not provided, glob microbes_dir
+        mic_files = sorted(microbes_dir.glob("*.yml"))
+
+    mic_files = [p for p in mic_files if p.exists()]
 
     return {
         "root": root,
         "system": sysd,
         "paths": {
-            "config_dir":   config_dir.resolve(),
-            "environments_dir": envs_dir.resolve(),
-            "spots_dir":    spots_dir.resolve(),
-            "microbes_dir": microbes_dir.resolve(),
+            "config_dir":        config_dir.resolve(),
+            "environments_dir":  envs_dir.resolve(),
+            "spots_dir":         spots_dir.resolve(),
+            "microbes_dir":      microbes_dir.resolve(),
         },
         "ecology_cfg": ecology_cfg.resolve() if ecology_cfg else None,
         "environment_files": env_files,
+        "microbe_files": mic_files,
     }
 
 def iter_spot_files_for_env(env_file: Path, sys_paths: Dict[str, Path]) -> List[Tuple[str, Path]]:
@@ -107,7 +131,7 @@ def iter_spot_files_for_env(env_file: Path, sys_paths: Dict[str, Path]) -> List[
         for s in spots:
             if not isinstance(s, dict):
                 continue
-            sid = s.get("id")
+            sid = s.get("id") or s.get("name") or (s.get("file") and Path(s["file"]).stem)
             f = s.get("file")
             if not sid or not f:
                 continue
