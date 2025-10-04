@@ -1,7 +1,12 @@
 spot:
-  name: S0001
-  position: {x: 100, y: 200, z: 0}
-
+  id: S0002
+  env_id: E001
+  position:
+    x_um: -23.9
+    y_um: 43.5
+    z_um: 0.0
+  region: lumen
+  volume_nl: 0.05
   measurements:
     microbes:
       type: counts          # counts | relative | biomass_gDW

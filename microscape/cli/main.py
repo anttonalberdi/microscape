@@ -7,7 +7,7 @@ from rich.progress import Progress
 from ..runner.snapshot import run_snapshot
 from ..io.graph_config import load_graph_yaml
 from ..viz.graph import scatter_field, interpolate_to_grid
-from ..validation.input import validate_system
+from ..validation.system import validate_system
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -97,6 +97,13 @@ def validate_cmd(
         typer.echo(f"Microbes: {summary.get('microbes',{}).get('count',0)} ({gens})")
         typer.echo(f"Environments: {summary.get('environments',{}).get('count',0)}")
         typer.echo(f"Spots: {summary.get('spots',{}).get('count',0)}")
+        models = summary.get('models', {})
+        space = summary.get('space', {})
+        typer.echo(f"Metabolites (unique): {models.get('metabolites_unique', 0)} | Species (total): {models.get('species_total', 0)}")
+        typer.echo(f"Genes: total {models.get('genes_total',0)}, expressed {models.get('genes_expressed',0)}, unused {models.get('genes_unused',0)}")
+        dims = space.get('dimensions')
+        dim_label = 'none' if dims in (None, 0) else (f"{dims}D")
+        typer.echo(f"Spatial positions: {'yes' if space.get('has_positions') else 'no'}; spots with pos: {space.get('spots_with_position',0)}; dims: {dim_label}")
         if warnings:
             typer.echo("")
             typer.secho(f"Warnings ({len(warnings)}):", fg=typer.colors.YELLOW)

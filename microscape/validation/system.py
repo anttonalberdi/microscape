@@ -1,11 +1,11 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+import xml.etree.ElementTree as ET
 
 try:
     import yaml  # PyYAML
-except Exception as e:
-    # Delay import error until used by CLI to keep module importable in docs builds
+except Exception:
     yaml = None  # type: ignore
 
 ALLOWED_MEASUREMENT_TYPES = {"counts", "relative", "biomass_gDW"}
@@ -25,15 +25,39 @@ def _load_yaml(p: Path, errors: List[str]) -> Any:
         errors.append(f"YAML parse error in {p}: {e}")
     return None
 
-def validate_system(system_path: Path) -> Tuple[Dict[str, Any], List[str], List[str]]:
-    """
-    Validate a microscape project starting from system.yml.
+def _parse_sbml_stats(model_file: Path, warnings: List[str]):
+    """Return (species_total, unique_metabolite_ids_set, genes_set, expressed_genes_set)."""
+    species_total = 0
+    mets = set()
+    genes = set()
+    expressed = set()
+    try:
+        tree = ET.parse(model_file)
+        root = tree.getroot()
+        ns = {
+            "sbml": "http://www.sbml.org/sbml/level3/version1/core",
+            "fbc": "http://www.sbml.org/sbml/level3/version1/fbc/version2",
+        }
+        for sp in root.findall(".//sbml:listOfSpecies/sbml:species", ns):
+            sid = sp.get("id") or ""
+            species_total += 1
+            base = sid.split("_")[0] if "_" in sid else sid
+            if base:
+                mets.add(base)
+        for gp in root.findall(".//fbc:listOfGeneProducts/fbc:geneProduct", ns):
+            gid = gp.get("{http://www.sbml.org/sbml/level3/version1/fbc/version2}id") or gp.get("id")
+            if gid:
+                genes.add(gid)
+        for gpr in root.findall(".//fbc:geneProductAssociation", ns):
+            for ref in gpr.findall(".//fbc:geneProductRef", ns):
+                gid = ref.get("{http://www.sbml.org/sbml/level3/version1/fbc/version2}geneProduct")
+                if gid:
+                    expressed.add(gid)
+    except Exception as e:
+        warnings.append(f"{model_file}: SBML parse warning: {e}")
+    return species_total, mets, genes, expressed
 
-    Returns:
-        summary: {root, microbes:{count,genera}, environments:{count}, spots:{count}}
-        errors:  list of fatal issues (non-zero exit in CLI)
-        warnings:list of non-fatal issues
-    """
+def validate_system(system_path: Path) -> Tuple[Dict[str, Any], List[str], List[str]]:
     errors: List[str] = []
     warnings: List[str] = []
     root = system_path.parent
@@ -54,7 +78,6 @@ def validate_system(system_path: Path) -> Tuple[Dict[str, Any], List[str], List[
         errors.append(f"{system_path}: system.registry must be a mapping.")
         registry = {}
 
-    # Collect registry sections
     env_entries = registry.get("environments", [])
     microbe_entries = registry.get("microbes", [])
     if not isinstance(env_entries, list):
@@ -64,12 +87,10 @@ def validate_system(system_path: Path) -> Tuple[Dict[str, Any], List[str], List[
         errors.append(f"{system_path}: system.registry.microbes must be a list of {{id,file}} entries.")
         microbe_entries = []
 
-    # Duplicate ID checks
     def _dupes(ids: List[str]) -> List[str]:
         seen, d = set(), []
         for x in ids:
-            if x in seen:
-                d.append(x)
+            if x in seen: d.append(x)
             seen.add(x)
         return d
 
@@ -80,8 +101,9 @@ def validate_system(system_path: Path) -> Tuple[Dict[str, Any], List[str], List[
         if d:
             errors.append(f"{system_path}: duplicate {name} ids: {sorted(d)}")
 
-    # Validate Microbes
+    # Microbes
     microbe_index: Dict[str, Dict[str, str]] = {}
+    model_files: List[Path] = []
     for e in microbe_entries:
         if not isinstance(e, dict) or "id" not in e or "file" not in e:
             errors.append(f"{system_path}: invalid microbe registry entry (need id,file): {e}")
@@ -111,13 +133,15 @@ def validate_system(system_path: Path) -> Tuple[Dict[str, Any], List[str], List[
             model_file = (myml.parent / model_path)
             if not model_file.exists():
                 errors.append(f"{myml}: model.path points to missing file: {model_path}")
+            else:
+                model_files.append(model_file)
         if not model_format:
             warnings.append(f"{myml}: model.format missing (expected 'sbml-l3v1-fbc2')")
         elif str(model_format).lower() != "sbml-l3v1-fbc2":
             warnings.append(f"{myml}: model.format '{model_format}' != 'sbml-l3v1-fbc2'")
         microbe_index[mid] = {"path": str(myml), "genus": tax.get("genus")}
 
-    # Validate Environments & Spots
+    # Environments & Spots
     spot_files: List[Path] = []
     for e in env_entries:
         if not isinstance(e, dict) or "id" not in e or "file" not in e:
@@ -146,8 +170,25 @@ def validate_system(system_path: Path) -> Tuple[Dict[str, Any], List[str], List[
             else:
                 spot_files.append(sf)
 
-    # Validate Spots
+    # Spots + spatial stats
     seen_spot_ids = set()
+    has_positions = False
+    spots_with_pos = 0
+    z_values: List[float] = []
+
+    def _spot_pos(spot_obj):
+        pos = spot_obj.get("pos_um") if isinstance(spot_obj, dict) else None
+        if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+            x, y = pos[0], pos[1]
+            z = pos[2] if len(pos) >= 3 else None
+            return x, y, z
+        x = spot_obj.get("x_um") if isinstance(spot_obj, dict) else None
+        y = spot_obj.get("y_um") if isinstance(spot_obj, dict) else None
+        z = spot_obj.get("z_um") if isinstance(spot_obj, dict) else None
+        if x is not None and y is not None:
+            return x, y, z
+        return None
+
     for sf in spot_files:
         sdata = _load_yaml(sf, errors)
         if not sdata or "spot" not in sdata:
@@ -175,6 +216,42 @@ def validate_system(system_path: Path) -> Tuple[Dict[str, Any], List[str], List[
         else:
             warnings.append(f"{sf}: no microbes measurements present")
 
+        pos = _spot_pos(spot)
+        if pos is not None:
+            has_positions = True
+            spots_with_pos += 1
+            _, _, z = pos
+            if z is not None:
+                try:
+                    z_values.append(float(z))
+                except Exception:
+                    pass
+
+    # Aggregate SBML stats across microbes
+    total_species = 0
+    unique_mets = set()
+    unique_genes = set()
+    expressed_genes = set()
+    for mf in model_files:
+        s_cnt, mets, genes, expr = _parse_sbml_stats(mf, warnings)
+        total_species += s_cnt
+        unique_mets |= mets
+        unique_genes |= genes
+        expressed_genes |= expr
+
+    # Dimensionality
+    if not has_positions:
+        dims = 0
+        z_uniform = None
+    else:
+        if not z_values:
+            dims = 2
+            z_uniform = True
+        else:
+            zmin = min(z_values); zmax = max(z_values)
+            z_uniform = (abs(zmax - zmin) < 1e-9)
+            dims = 2 if z_uniform else 3
+
     summary = {
         "root": str(root),
         "microbes": {
@@ -183,5 +260,18 @@ def validate_system(system_path: Path) -> Tuple[Dict[str, Any], List[str], List[
         },
         "environments": {"count": len(env_entries)},
         "spots": {"count": len(seen_spot_ids)},
+        "models": {
+            "species_total": total_species,
+            "metabolites_unique": len(unique_mets),
+            "genes_total": len(unique_genes),
+            "genes_expressed": len(expressed_genes),
+            "genes_unused": max(0, len(unique_genes) - len(expressed_genes)),
+        },
+        "space": {
+            "has_positions": has_positions,
+            "spots_with_position": spots_with_pos,
+            "dimensions": dims,
+            "z_uniform": z_uniform,
+        },
     }
     return summary, errors, warnings
