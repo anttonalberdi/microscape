@@ -4,25 +4,25 @@ _A computational framework for integrative spatial modelling of microbial landsc
 
 [![Status](https://img.shields.io/badge/status-alpha-informational)](#roadmap) [![OS](https://img.shields.io/badge/os-Linux%20%7C%20macOS-lightgrey)](#requirements) [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](#requirements) [![License](https://img.shields.io/badge/license-See%20LICENSE-lightgrey)](./LICENSE)
 
+> MicroScape is in **ALPHA DEVELOPMENTAL PHASE**
+
 ---
 
 ## ✨ What is MicroScape?
-MicroScape helps you **simulate**, **validate** and **analyze** micro‑scale spatial microbiome data. It is designed for workflows such as 3D host–microbe mapping and spatial ecology where you need to:
+MicroScape helps you **map**, **simulate**, and **analyse** micro‑scale spatial microbiome data. It is designed for workflows such as 3D host–microbe mapping and spatial ecology where you need to:
 
-- Define **spatial design parameters (SDP)** and validate them before running experiments
-- **Simulate** microbial landscapes under realistic constraints
-- Export results in analysis‑ready formats (e.g., `.npz`, `.csv`) and visualize basic diagnostics
-
-> If you are looking for a practical way to prototype spatial sampling designs and benchmark downstream analyses on synthetic ground truth, MicroScape is for you.
+- **Map** different spatial omic datasets, including spatial metagenomics, metatranscriptomics and metabolomics.
+- **Simulate** microbial landscapes under realistic constraints.
+- **Analyse** microbiome functioning, microbe-microbe and host-microbiota interactions
 
 ---
 
 ## 🚀 Quick start
 
 ### Requirements
-- **Python** ≥ 3.10 (via Conda recommended)
-- Unix‑like OS (Linux or macOS)
-- ~2–4 GB RAM for the synthetic demo
+- **Python** ≥ 3.10 (via Conda recommended).
+- Unix‑like OS (Linux or macOS).
+- ~2–4 GB RAM for the synthetic demo.
 
 ### Install (Conda)
 ```bash
@@ -34,13 +34,13 @@ microscape --help
 ### Run the synthetic demo
 ```bash
 # 1) Validate an example Spatial Design Parameter (SDP) folder
-microscape validate-sdp examples/00_synthetic/sdp_demo
+microscape validate -i demo/system.yml
 
 # 2) Simulate a spatially explicit microbial landscape
-microscape simulate examples/00_synthetic/sim_config.yml --out outputs/run_001.npz
-```
+microscape profile -i demo/system.yml -o results/
 
-> The `outputs/run_001.npz` file can be loaded in Python or exported with the CLI subcommands below for plotting and tabular summaries.
+# 2) Simulate a spatially explicit microbial landscape
+microscape calibrate -i demo/system.yml -o results/
 
 ---
 
@@ -73,42 +73,6 @@ microscape/
 ├─ pyproject.toml   # Build metadata
 └─ README.md        # This file
 ```
-
----
-
-## 📦 Using MicroScape in Python
-Although the CLI is the recommended interface, you can load outputs programmatically:
-
-```python
-import numpy as np
-z = np.load("outputs/run_001.npz")
-print(list(z.keys()))  # e.g., coordinates, abundance, taxonomy, metadata
-```
-
----
-
-## 🧪 Development
-
-### Set up a dev environment
-```bash
-# Clone your fork
-git clone https://github.com/<you>/microscape
-cd microscape
-
-# Create the environment used for development
-conda env create -f envs/microscape.yaml
-conda activate microscape
-
-# Install in editable mode (if needed)
-pip install -e .
-```
-
-### Run tests & linters
-```bash
-pytest -q
-```
-
-> Consider enabling pre‑commit hooks to enforce style/quality. We follow standard Python typing and docstrings.
 
 ---
 
@@ -145,41 +109,6 @@ microscape simulate sim_config.yml --out outputs/run.npz
 ```bash
 microscape plot outputs/run_001.npz --what abundance --save fig_abundance.png
 ```
-
----
-
-## 🤝 Contributing
-Contributions are welcome! Please open an issue first to discuss the change you’d like to make. Typical contributions include:
-- New landscape or measurement models
-- Additional exporters and validators
-- Documentation improvements & examples
-
-### Pull request checklist
-- [ ] Tests added/updated
-- [ ] Docs updated (`README`, `docs/`, or `examples/`)
-- [ ] CI passes locally (`pytest`)
-
----
-
-## 🗺️ Roadmap
-- [ ] Public API stabilization of core models
-- [ ] Expanded demo datasets and tutorials
-- [ ] Benchmarks against empirical datasets
-- [ ] Optional GPU‑accelerated kernels where relevant
-
-Have suggestions? Please open a discussion or an issue.
-
----
-
-## 📣 Citing MicroScape
-If you use MicroScape in a publication, please cite this repository and the associated preprint/article when available. For now:
-
-```
-Alberdi A., et al. MicroScape: integrative spatial modelling of microbial landscapes. GitHub repository: https://github.com/anttonalberdi/microscape
-```
-
-> Also consider citing relevant methods describing micro‑scale spatial metagenomics and 3D host–microbiota mapping.
-
 ---
 
 ## 🧾 License
@@ -192,5 +121,5 @@ Distributed under the terms described in [LICENSE](./LICENSE).
 ---
 
 ## 🙏 Acknowledgements
-This project is developed in the context of spatial host–microbe research. We thank contributors and testers who provide feedback via issues and PRs.
+This project is developed in the context of international collaboration between the University of Copenhagen and Kiel University on spatial host–microbe research.
 
