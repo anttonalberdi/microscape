@@ -6,7 +6,7 @@ from rich.progress import Progress
 from ..runner.snapshot import run_snapshot
 from ..io.graph_config import load_graph_yaml
 from ..viz.graph import scatter_field, interpolate_to_grid
-from ..validation.system import validate_system
+from ..validate.system import validate_system
 from ..io.system_loader import load_system, iter_spot_files_for_env
 from ..profile.ecology import load_rules, profile_spot
 
