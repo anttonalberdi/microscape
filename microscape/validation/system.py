@@ -10,19 +10,6 @@ except Exception:
 
 ALLOWED_MEASUREMENT_TYPES = {"counts", "relative", "biomass_gDW"}
 
-def _coerce_num_or_bool(v):
-    try:
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, (int, float)):
-            return float(v)
-        s = str(v).strip().lower()
-        if s in ("true","yes","present","1"): return True
-        if s in ("false","no","absent","0"): return False
-        return float(s)
-    except Exception:
-        return None
-
 def _ensure_yaml():
     if yaml is None:
         raise RuntimeError("PyYAML is required. Install with: pip install pyyaml")
@@ -188,56 +175,19 @@ def validate_system(system_path: Path) -> Tuple[Dict[str, Any], List[str], List[
     has_positions = False
     spots_with_pos = 0
     z_values: List[float] = []
-    # Gene/expression accumulators from spots
-    spots_with_gene_data = 0
-    spot_genes_all = set()
-    spot_genes_expressed = set()
 
-    
-def _spot_pos(spot_obj):
-    """Return (x, y, z) if position found, else None.
-    Accepted layouts:
-      - pos_um: [x, y] or [x, y, z]
-      - x_um, y_um, (z_um) at top level
-      - position: { x_um, y_um, (z_um) }
-      - position: { x, y, (z) }  (fallback)
-      - x, y, (z) at top level (fallback)
-    """
-    def _coerce(v):
-        try:
-            return float(v)
-        except Exception:
-            return None
-
-    if not isinstance(spot_obj, dict):
+    def _spot_pos(spot_obj):
+        pos = spot_obj.get("pos_um") if isinstance(spot_obj, dict) else None
+        if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+            x, y = pos[0], pos[1]
+            z = pos[2] if len(pos) >= 3 else None
+            return x, y, z
+        x = spot_obj.get("x_um") if isinstance(spot_obj, dict) else None
+        y = spot_obj.get("y_um") if isinstance(spot_obj, dict) else None
+        z = spot_obj.get("z_um") if isinstance(spot_obj, dict) else None
+        if x is not None and y is not None:
+            return x, y, z
         return None
-
-    # 1) pos_um as list/tuple
-    pos = spot_obj.get("pos_um")
-    if isinstance(pos, (list, tuple)) and len(pos) >= 2:
-        x = _coerce(pos[0]); y = _coerce(pos[1])
-        z = _coerce(pos[2]) if len(pos) >= 3 else None
-        if x is not None and y is not None:
-            return x, y, z
-
-    # 2) nested position mapping
-    posmap = spot_obj.get("position")
-    if isinstance(posmap, dict):
-        x = _coerce(posmap.get("x_um", posmap.get("x")))
-        y = _coerce(posmap.get("y_um", posmap.get("y")))
-        z = _coerce(posmap.get("z_um", posmap.get("z")))
-        if x is not None and y is not None:
-            return x, y, z
-
-    # 3) top-level x_um/y_um(/z_um)
-    x = _coerce(spot_obj.get("x_um", spot_obj.get("x")))
-    y = _coerce(spot_obj.get("y_um", spot_obj.get("y")))
-    z = _coerce(spot_obj.get("z_um", spot_obj.get("z")))
-    if x is not None and y is not None:
-        return x, y, z
-
-    return None
-
 
     for sf in spot_files:
         sdata = _load_yaml(sf, errors)
@@ -265,41 +215,6 @@ def _spot_pos(spot_obj):
                     warnings.append(f"{sf}: microbes.values contains unknown microbe id '{mid}' (not in system.registry.microbes)")
         else:
             warnings.append(f"{sf}: no microbes measurements present")
-
-        # Gene/expression blocks
-        gene_blocks = []
-        for key in (\"genes\",\"expression\",\"gene_expression\",\"transcripts\",\"expressed_genes\"):
-            if key in spot.get(\"measurements\", {}):
-                gene_blocks.append((key, spot[\"measurements\"][key]))
-        # Also allow genes under spot directly
-        for key in (\"genes\",\"expression\",\"gene_expression\",\"transcripts\",\"expressed_genes\"):
-            if key in spot and (key, spot[key]) not in gene_blocks:
-                gene_blocks.append((key, spot[key]))
-        had_gene_data = False
-        for key, block in gene_blocks:
-            if isinstance(block, dict):
-                # values mapping
-                vals = block.get(\"values\", {}) if isinstance(block.get(\"values\", {}), dict) else block if \"values\" not in block else {}
-                thr = block.get(\"threshold\", 0.0)
-                try:
-                    thr = float(thr)
-                except Exception:
-                    thr = 0.0
-                if isinstance(vals, dict):
-                    had_gene_data = True
-                    for gid, v in vals.items():
-                        spot_genes_all.add(str(gid))
-                        coer = _coerce_num_or_bool(v)
-                        if coer is True or (isinstance(coer, (int,float)) and float(coer) > thr):
-                            spot_genes_expressed.add(str(gid))
-            elif isinstance(block, list):
-                # treat as list of expressed genes
-                had_gene_data = True
-                for gid in block:
-                    spot_genes_all.add(str(gid))
-                    spot_genes_expressed.add(str(gid))
-        if had_gene_data:
-            spots_with_gene_data += 1
 
         pos = _spot_pos(spot)
         if pos is not None:
@@ -337,10 +252,6 @@ def _spot_pos(spot_obj):
             z_uniform = (abs(zmax - zmin) < 1e-9)
             dims = 2 if z_uniform else 3
 
-    # Map expressed spot genes to model genes
-    genes_mapped = len(spot_genes_expressed & unique_genes)
-    genes_unmapped = max(0, len(spot_genes_expressed) - genes_mapped)
-
     summary = {
         "root": str(root),
         "microbes": {
@@ -351,7 +262,6 @@ def _spot_pos(spot_obj):
         "spots": {"count": len(seen_spot_ids)},
         "models": {
             "species_total": total_species,
-            "sbml_species_total": total_species,
             "metabolites_unique": len(unique_mets),
             "genes_total": len(unique_genes),
             "genes_expressed": len(expressed_genes),
@@ -362,13 +272,6 @@ def _spot_pos(spot_obj):
             "spots_with_position": spots_with_pos,
             "dimensions": dims,
             "z_uniform": z_uniform,
-        },
-        "omics": {
-            "spots_with_gene_data": spots_with_gene_data,
-            "genes_listed_unique": len(spot_genes_all),
-            "genes_expressed_unique": len(spot_genes_expressed),
-            "genes_mapped_to_model": genes_mapped,
-            "genes_unmapped": genes_unmapped,
         },
     }
     return summary, errors, warnings

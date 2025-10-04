@@ -78,7 +78,6 @@ def update(
             typer.echo("   • microscape update --verbose   # to see full pip logs")
         raise typer.Exit(code=e.returncode)
 
-
 @app.command("validate")
 def validate_cmd(
     system_yml: Path = typer.Argument(..., help="Path to system.yml"),
@@ -94,17 +93,16 @@ def validate_cmd(
     else:
         typer.echo("== microscape validation report ==")
         typer.echo(f"Root: {summary.get('root')}")
-        gens = ", ".join(summary.get("microbes", {}).get("genera", []))
-        typer.echo(f"Microbes: {summary.get('microbes',{}).get('count',0)} ({gens})")
+        typer.echo(f"Microbes: {summary.get('microbes',{}).get('count',0)}")
         typer.echo(f"Environments: {summary.get('environments',{}).get('count',0)}")
         typer.echo(f"Spots: {summary.get('spots',{}).get('count',0)}")
         models = summary.get('models', {})
         space = summary.get('space', {})
-        typer.echo(f"Metabolite pools (SBML species): {models.get('sbml_species_total', models.get('species_total', 0))} | Unique metabolites: {models.get('metabolites_unique', 0)}")
+        typer.echo(f"Metabolites (unique): {models.get('metabolites_unique', 0)} | Species (total): {models.get('species_total', 0)}")
         typer.echo(f"Genes: total {models.get('genes_total',0)}, expressed {models.get('genes_expressed',0)}, unused {models.get('genes_unused',0)}")
         dims = space.get('dimensions')
-        dim_label = 'none' if dims in (None, 0) else (f\"{dims}D\")
-        typer.echo(f\"Spatial positions: {'yes' if space.get('has_positions') else 'no'}; spots with pos: {space.get('spots_with_position',0)}; dims: {dim_label}\")
+        dim_label = 'none' if dims in (None, 0) else (f"{dims}D")
+        typer.echo(f"Spatial positions: {'yes' if space.get('has_positions') else 'no'}; spots with pos: {space.get('spots_with_position',0)}; dims: {dim_label}")
         if warnings:
             typer.echo("")
             typer.secho(f"Warnings ({len(warnings)}):", fg=typer.colors.YELLOW)
@@ -118,7 +116,6 @@ def validate_cmd(
         typer.echo("")
         typer.secho("Result: " + ("FAILED" if errors else "OK"), fg=typer.colors.RED if errors else typer.colors.GREEN)
     raise typer.Exit(code=1 if errors else 0)
-
 
 @app.command("simulate")
 def simulate_cmd(
