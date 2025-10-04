@@ -1,0 +1,13 @@
+microbe:
+  id: M0008
+  label: Microbe_8
+  taxonomy:
+    phylum: Phylum8
+    class: Class8
+    order: Order8
+    family: Family8
+    genus: Genus8
+    species: Species1
+  model:
+    path: M0008.xml
+    format: sbml-l3v1-fbc2

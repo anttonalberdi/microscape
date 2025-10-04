@@ -1,0 +1,13 @@
+microbe:
+  id: M0004
+  label: Microbe_4
+  taxonomy:
+    phylum: Phylum4
+    class: Class4
+    order: Order4
+    family: Family4
+    genus: Genus4
+    species: Species1
+  model:
+    path: M0004.xml
+    format: sbml-l3v1-fbc2

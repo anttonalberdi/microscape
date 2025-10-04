@@ -1,0 +1,31 @@
+environment:
+  id: E002
+  label: Env_E002
+  factors:
+    treatment: diet_B
+    timepoint: T1
+  blocking:
+    pen: cage2
+  covariates:
+    weight: 20.7
+  spots:
+  - id: S0011
+    file: spots/S0011.yml
+  - id: S0012
+    file: spots/S0012.yml
+  - id: S0013
+    file: spots/S0013.yml
+  - id: S0014
+    file: spots/S0014.yml
+  - id: S0015
+    file: spots/S0015.yml
+  - id: S0016
+    file: spots/S0016.yml
+  - id: S0017
+    file: spots/S0017.yml
+  - id: S0018
+    file: spots/S0018.yml
+  - id: S0019
+    file: spots/S0019.yml
+  - id: S0020
+    file: spots/S0020.yml

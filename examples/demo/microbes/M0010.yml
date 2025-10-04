@@ -1,0 +1,13 @@
+microbe:
+  id: M0010
+  label: Microbe_10
+  taxonomy:
+    phylum: Phylum3
+    class: Class3
+    order: Order10
+    family: Family3
+    genus: Genus3
+    species: Species2
+  model:
+    path: M0010.xml
+    format: sbml-l3v1-fbc2

@@ -6,6 +6,7 @@ from rich.progress import Progress
 from ..runner.snapshot import run_snapshot
 from ..io.graph_config import load_graph_yaml
 from ..viz.graph import scatter_field, interpolate_to_grid
+from ..validation.input import validate_system
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -75,6 +76,39 @@ def update(
             typer.echo("   • microscape update --with-deps")
             typer.echo("   • microscape update --verbose   # to see full pip logs")
         raise typer.Exit(code=e.returncode)
+
+@app.command("validate")
+def validate_cmd(
+    system_yml: Path = typer.Argument(..., help="Path to system.yml"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON report"),
+):
+    """
+    Validate a microscape project starting at system.yml.
+    Exits with non-zero code if errors are found.
+    """
+    summary, errors, warnings = validate_system(system_yml.resolve())
+    if json_out:
+        typer.echo(json.dumps({"summary": summary, "errors": errors, "warnings": warnings}, indent=2))
+    else:
+        typer.echo("== microscape validation report ==")
+        typer.echo(f"Root: {summary.get('root')}")
+        gens = ", ".join(summary.get("microbes", {}).get("genera", []))
+        typer.echo(f"Microbes: {summary.get('microbes',{}).get('count',0)} ({gens})")
+        typer.echo(f"Environments: {summary.get('environments',{}).get('count',0)}")
+        typer.echo(f"Spots: {summary.get('spots',{}).get('count',0)}")
+        if warnings:
+            typer.echo("")
+            typer.secho(f"Warnings ({len(warnings)}):", fg=typer.colors.YELLOW)
+            for w in warnings:
+                typer.echo(f"  - {w}")
+        if errors:
+            typer.echo("")
+            typer.secho(f"Errors ({len(errors)}):", fg=typer.colors.RED)
+            for e in errors:
+                typer.echo(f"  - {e}")
+        typer.echo("")
+        typer.secho("Result: " + ("FAILED" if errors else "OK"), fg=typer.colors.RED if errors else typer.colors.GREEN)
+    raise typer.Exit(code=1 if errors else 0)
 
 @app.command("simulate")
 def simulate_cmd(

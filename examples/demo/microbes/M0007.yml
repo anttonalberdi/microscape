@@ -1,0 +1,13 @@
+microbe:
+  id: M0007
+  label: Microbe_7
+  taxonomy:
+    phylum: Phylum7
+    class: Class7
+    order: Order7
+    family: Family7
+    genus: Genus7
+    species: Species1
+  model:
+    path: M0007.xml
+    format: sbml-l3v1-fbc2

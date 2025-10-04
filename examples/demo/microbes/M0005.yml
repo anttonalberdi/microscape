@@ -1,0 +1,13 @@
+microbe:
+  id: M0005
+  label: Microbe_5
+  taxonomy:
+    phylum: Phylum5
+    class: Class5
+    order: Order5
+    family: Family5
+    genus: Genus5
+    species: Species1
+  model:
+    path: M0005.xml
+    format: sbml-l3v1-fbc2
