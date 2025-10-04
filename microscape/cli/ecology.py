@@ -2,15 +2,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Dict, Any
 import csv, json, typer
-from rich.progress import Progress
 
 from ..io.system_loader import load_system, iter_spot_files_for_env
 from ..profile.ecology import load_rules, profile_spot
 
 app = typer.Typer(add_completion=False)
 
-@app.command("profile")
-def profile_cmd(
+@app.command("ecology")
+def ecology_cmd(
     system_yml: Path = typer.Argument(..., help="Path to system.yml"),
     outdir: Path = typer.Option("outputs/profile", help="Output directory"),
 ):

@@ -6,12 +6,15 @@ from rich.progress import Progress
 from ..runner.snapshot import run_snapshot
 from ..io.graph_config import load_graph_yaml
 from ..viz.graph import scatter_field, interpolate_to_grid
-from .profile import app as profile_app
+
 from .validate import app as validate_app
+from .ecology import app as ecology_app
+from .metabolism import app as metabolism_app
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
-app.add_typer(profile_app, name="") 
 app.add_typer(validate_app, name="") 
+app.add_typer(ecology_app, name="") 
+app.add_typer(metabolism_app, name="") 
 
 # Repository URL used for updates
 REPO_URL = "git+https://github.com/anttonalberdi/microscape.git"
