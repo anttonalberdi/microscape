@@ -5,20 +5,25 @@ system:
   author: "Antton Alberdi"
   type: host # host, environment, laboratory
 
+  # Configuration
+
+  config:
+    ecology: ecology.yml
+
+  paths:
+    config_dir: config
+    environments_dir: environments
+    spots_dir: spots
+    microbes_dir: microbes
+
+  #Experimental design
+
   design:
     factors:
       treatment: ["diet_A", "diet_B"]
       timepoint: ["T1", "T2"]
     blocking:
       block: ["cage1", "cage2"]
-
-  config:
-    ecology: config/ecology.yml
-
-  paths:
-    environments_dir: environments
-    spots_dir: spots
-    microbes_dir: microbes
 
   # Global registries for environments, microbes, and metabolites
   registry:
