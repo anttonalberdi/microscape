@@ -7,7 +7,8 @@ from ..runner.snapshot import run_snapshot
 from ..io.graph_config import load_graph_yaml
 from ..viz.graph import scatter_field, interpolate_to_grid
 from ..validation.system import validate_system
-from ..profile.ecology import profile_system
+from ..io.system_loader import load_system, iter_spot_files_for_env
+from ..profile.ecology import load_rules, profile_spot
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -133,8 +134,6 @@ def profile_cmd(
     outdir: Path = typer.Option("outputs/profile", help="Directory to write enriched outputs"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Print discovered files"),
 ):
-    from ..io.system_loader import load_system, iter_spot_files_for_env
-    from ..profile.ecology_profile import load_rules, profile_spot
 
     sys_info = load_system(system_yml)
     root = sys_info["root"]
