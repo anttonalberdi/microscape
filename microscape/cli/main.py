@@ -120,10 +120,45 @@ def validate_cmd(
     raise typer.Exit(code=1 if errors else 0)
 
 """
-Run profiling
+    Run ecology profiling on a microscape project:
+    - reads system.yml -> environments -> spots
+    - infers per-microbe ecology states/scores from transcripts (TPM) using ecology config
+    - writes enriched spot YAMLs under OUTDIR mirroring the original layout
+    - writes profile_summary.csv (and .json if requested)
 """
 
 @app.command("profile")
+def profile_cmd(
+    system_yml: Path = typer.Argument(..., help="Path to system.yml"),
+    ecology_config: Path = typer.Option(None, "--ecology-config", "-e",
+                                        help="Ecology rules YAML (traits/markers/thresholds). If omitted, searches beside system.yml (ecology.yml)."),
+    outdir: Path = typer.Option("work/profile", help="Output directory to write enriched spot YAMLs and summaries."),
+    overwrite: bool = typer.Option(False, help="Overwrite existing enriched Spot files if present."),
+    json_out: bool = typer.Option(True, help="Also write a JSON summary."),
+):
+
+    system_yml = system_yml.resolve()
+    if ecology_config is None:
+        cand = system_yml.parent / "ecology.yml"
+        if not cand.exists():
+            typer.secho("Ecology config not provided and ecology.yml not found next to system.yml.", fg=typer.colors.RED)
+            raise typer.Exit(code=2)
+        ecology_config = cand
+
+    outdir = outdir.resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    typer.secho(f"🧭 Profiling ecology\n  system: {system_yml}\n  rules : {ecology_config}\n  out   : {outdir}", fg=typer.colors.CYAN)
+
+    with Progress() as progress:
+        task = progress.add_task("[cyan]Profiling…", total=100)
+        result = profile_system(system_yml, ecology_config, outdir, overwrite=overwrite,
+                                progress_cb=lambda p: progress.update(task, completed=min(100, p)))
+    # Write summary
+    (outdir / "profile_summary.csv").write_text(result["summary_csv"])
+    if json_out:
+        (outdir / "profile_summary.json").write_text(json.dumps(result["summary_json"], indent=2))
+    typer.secho("✅ Ecology profiling complete.", fg=typer.colors.GREEN)
 
 @app.command("simulate")
 def simulate_cmd(
