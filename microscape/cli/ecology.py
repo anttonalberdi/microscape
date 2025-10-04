@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Dict, Any
 import csv, json, typer
+from rich.progress import Progress
 
 from ..io.system_loader import load_system, iter_spot_files_for_env
 from ..profile.ecology import load_rules, profile_spot
