@@ -10,22 +10,22 @@ environment:
     weight: 22.9
   spots:
   - id: S0001
-    file: spots/S0001.yml
+    file: S0001.yml
   - id: S0002
-    file: spots/S0002.yml
+    file: S0002.yml
   - id: S0003
-    file: spots/S0003.yml
+    file: S0003.yml
   - id: S0004
-    file: spots/S0004.yml
+    file: S0004.yml
   - id: S0005
-    file: spots/S0005.yml
+    file: S0005.yml
   - id: S0006
-    file: spots/S0006.yml
+    file: S0006.yml
   - id: S0007
-    file: spots/S0007.yml
+    file: S0007.yml
   - id: S0008
-    file: spots/S0008.yml
+    file: S0008.yml
   - id: S0009
-    file: spots/S0009.yml
+    file: S0009.yml
   - id: S0010
-    file: spots/S0010.yml
+    file: S0010.yml
