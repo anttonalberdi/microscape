@@ -130,80 +130,67 @@ def validate_cmd(
 @app.command("profile")
 def profile_cmd(
     system_yml: Path = typer.Argument(..., help="Path to system.yml"),
-    ecology_config: Path = typer.Option(None, "--ecology-config", "-e",
-        help="(Optional) override for ecology rules YAML. If omitted, uses system.config.ecology."),
-    outdir: Path = typer.Option("work/profile", help="Output directory for enriched spot YAMLs and summaries."),
-    overwrite: bool = typer.Option(False, help="Overwrite enriched spot files if they already exist."),
-    json_out: bool = typer.Option(True, help="Also write a JSON summary."),
+    outdir: Path = typer.Option("outputs/profile", help="Directory to write enriched outputs"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Print discovered files"),
 ):
-    """
-    Run ecology profiling:
-      - Reads system.yml -> environments -> spots
-      - Resolves ecology rules from system.config.ecology (or --ecology-config override)
-      - Infers per-microbe trait states/scores from transcripts
-      - Writes enriched spots under OUTDIR and a summary CSV/JSON
-    """
-    system_yml = system_yml.resolve()
+    from ..io.system_loader import load_system, iter_spot_files_for_env
+    from ..profile.ecology_profile import load_rules, profile_spot
 
-    # Resolve ecology rules path
-    if ecology_config is None:
-        # Read system.yml to find system.config.ecology
-        try:
-            import yaml
-            sysd = yaml.safe_load(system_yml.read_text())
-            ec_rel = (((sysd or {}).get("system") or {}).get("config") or {}).get("ecology")
-        except Exception as e:
-            typer.secho(f"Failed to read {system_yml}: {e}", fg=typer.colors.RED)
-            raise typer.Exit(code=2)
+    sys_info = load_system(system_yml)
+    root = sys_info["root"]
+    env_files = sys_info["environment_files"]
+    rules_path = sys_info["ecology_cfg"]
+    if not rules_path or not rules_path.exists():
+        typer.secho("❌ Ecology rules not found (system.config.ecology).", fg=typer.colors.RED)
+        raise typer.Exit(2)
 
-        if ec_rel is None:
-            typer.secho(
-                "No ecology rules provided: system.config.ecology missing and no --ecology-config given.",
-                fg=typer.colors.RED
-            )
-            raise typer.Exit(code=2)
+    rules = load_rules(rules_path)
+    outdir = Path(outdir); outdir.mkdir(parents=True, exist_ok=True)
+    csv_path = outdir / "profile_summary.csv"
+    json_path = outdir / "profile_summary.json"
 
-        ecology_config = (system_yml.parent / ec_rel).resolve()
+    typer.echo("🧭 Profiling ecology")
+    typer.echo(f"  system : {system_yml.resolve()}")
+    typer.echo(f"  rules  : {rules_path}")
+    typer.echo(f"  out    : {outdir.resolve()}")
 
-    if not ecology_config.exists():
-        typer.secho(f"Ecology config not found: {ecology_config}", fg=typer.colors.RED)
-        raise typer.Exit(code=2)
+    headers = ["spot","microbe","abundance"]
+    # infer trait columns from rules
+    for t in (rules.get("ecology",{}).get("traits") or []):
+        tid = t["id"]
+        headers += [f"{tid}_state", f"{tid}_score", f"{tid}_expr_TPM"]
 
-    outdir = outdir.resolve()
-    outdir.mkdir(parents=True, exist_ok=True)
+    total_rows = 0
+    env_count = 0
+    with Progress() as progress, open(csv_path, "w", newline="") as f:
+        task = progress.add_task("[cyan]Profiling…", total=None)
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
 
-    typer.secho(
-        f"🧭 Profiling ecology\n  system : {system_yml}\n  rules  : {ecology_config}\n  out    : {outdir}",
-        fg=typer.colors.CYAN
-    )
+        for env_file in env_files:
+            env_count += 1
+            spot_list = iter_spot_files_for_env(env_file, sys_info["paths"])
+            if verbose:
+                typer.echo(f"  • {env_file.name}: {len(spot_list)} spots")
+            for sid, spath in spot_list:
+                if not spath or not spath.exists():
+                    if verbose:
+                        typer.echo(f"    - SKIP missing spot file: {spath}")
+                    continue
+                rows = profile_spot(spath, rules)
+                for r in rows:
+                    writer.writerow(r)
+                    total_rows += 1
+                progress.advance(task)
 
-    # Optional: quick validation to catch broken references before profiling
-    try:
-        _, errors, _ = validate_system(system_yml)
-        if errors:
-            typer.secho("Validation errors found; profiling may fail:", fg=typer.colors.YELLOW)
-            for e in errors:
-                typer.echo(f"  - {e}")
-    except Exception:
-        # validation is optional; don’t block profiling
-        pass
-
-    with Progress() as progress:
-        task = progress.add_task("[cyan]Profiling…", total=100)
-        result = profile_system(
-            system_yml,
-            ecology_config,
-            outdir,
-            overwrite=overwrite,
-            progress_cb=lambda p: progress.update(task, completed=min(100, p)),
-        )
-
-    # Write summaries
-    (outdir / "profile_summary.csv").write_text(result["summary_csv"])
-    if json_out:
-        (outdir / "profile_summary.json").write_text(json.dumps(result["summary_json"], indent=2))
-
+    summary = {
+        "n_environments": env_count,
+        "n_spots_processed": total_rows,  # rows count (microbe-spot pairs)
+        "traits": [t["id"] for t in (rules.get("ecology",{}).get("traits") or [])]
+    }
+    json_path.write_text(json.dumps(summary, indent=2))
     typer.secho("✅ Ecology profiling complete.", fg=typer.colors.GREEN)
+
 
 @app.command("simulate")
 def simulate_cmd(
