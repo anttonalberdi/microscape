@@ -93,8 +93,7 @@ def validate_cmd(
     else:
         typer.echo("== microscape validation report ==")
         typer.echo(f"Root: {summary.get('root')}")
-        gens = ", ".join(summary.get("microbes", {}).get("genera", []))
-        typer.echo(f"Microbes: {summary.get('microbes',{}).get('count',0)} ({gens})")
+        typer.echo(f"Microbes: {summary.get('microbes',{}).get('count',0)}")
         typer.echo(f"Environments: {summary.get('environments',{}).get('count',0)}")
         typer.echo(f"Spots: {summary.get('spots',{}).get('count',0)}")
         models = summary.get('models', {})

@@ -81,10 +81,10 @@ def validate_system(system_path: Path) -> Tuple[Dict[str, Any], List[str], List[
     env_entries = registry.get("environments", [])
     microbe_entries = registry.get("microbes", [])
     if not isinstance(env_entries, list):
-        errors.append(f"{system_path}: system.registry.environments must be a list of {{id,file}} entries.")
+        errors.append(f"{system_path}: system.registry.environments must be a list of {id,file} entries.")
         env_entries = []
     if not isinstance(microbe_entries, list):
-        errors.append(f"{system_path}: system.registry.microbes must be a list of {{id,file}} entries.")
+        errors.append(f"{system_path}: system.registry.microbes must be a list of {id,file} entries.")
         microbe_entries = []
 
     def _dupes(ids: List[str]) -> List[str]:
