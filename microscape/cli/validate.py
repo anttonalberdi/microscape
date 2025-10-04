@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 import json, typer
+from ..validate.system import validate_system
 
 app = typer.Typer(add_completion=False)
 
