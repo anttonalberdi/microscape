@@ -131,33 +131,78 @@ def validate_cmd(
 def profile_cmd(
     system_yml: Path = typer.Argument(..., help="Path to system.yml"),
     ecology_config: Path = typer.Option(None, "--ecology-config", "-e",
-                                        help="Ecology rules YAML (traits/markers/thresholds). If omitted, searches beside system.yml (ecology.yml)."),
-    outdir: Path = typer.Option("work/profile", help="Output directory to write enriched spot YAMLs and summaries."),
-    overwrite: bool = typer.Option(False, help="Overwrite existing enriched Spot files if present."),
+        help="(Optional) override for ecology rules YAML. If omitted, uses system.config.ecology."),
+    outdir: Path = typer.Option("work/profile", help="Output directory for enriched spot YAMLs and summaries."),
+    overwrite: bool = typer.Option(False, help="Overwrite enriched spot files if they already exist."),
     json_out: bool = typer.Option(True, help="Also write a JSON summary."),
 ):
-
+    """
+    Run ecology profiling:
+      - Reads system.yml -> environments -> spots
+      - Resolves ecology rules from system.config.ecology (or --ecology-config override)
+      - Infers per-microbe trait states/scores from transcripts
+      - Writes enriched spots under OUTDIR and a summary CSV/JSON
+    """
     system_yml = system_yml.resolve()
+
+    # Resolve ecology rules path
     if ecology_config is None:
-        cand = system_yml.parent / "ecology.yml"
-        if not cand.exists():
-            typer.secho("Ecology config not provided and ecology.yml not found next to system.yml.", fg=typer.colors.RED)
+        # Read system.yml to find system.config.ecology
+        try:
+            import yaml
+            sysd = yaml.safe_load(system_yml.read_text())
+            ec_rel = (((sysd or {}).get("system") or {}).get("config") or {}).get("ecology")
+        except Exception as e:
+            typer.secho(f"Failed to read {system_yml}: {e}", fg=typer.colors.RED)
             raise typer.Exit(code=2)
-        ecology_config = cand
+
+        if ec_rel is None:
+            typer.secho(
+                "No ecology rules provided: system.config.ecology missing and no --ecology-config given.",
+                fg=typer.colors.RED
+            )
+            raise typer.Exit(code=2)
+
+        ecology_config = (system_yml.parent / ec_rel).resolve()
+
+    if not ecology_config.exists():
+        typer.secho(f"Ecology config not found: {ecology_config}", fg=typer.colors.RED)
+        raise typer.Exit(code=2)
 
     outdir = outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
-    typer.secho(f"🧭 Profiling ecology\n  system: {system_yml}\n  rules : {ecology_config}\n  out   : {outdir}", fg=typer.colors.CYAN)
+    typer.secho(
+        f"🧭 Profiling ecology\n  system : {system_yml}\n  rules  : {ecology_config}\n  out    : {outdir}",
+        fg=typer.colors.CYAN
+    )
+
+    # Optional: quick validation to catch broken references before profiling
+    try:
+        _, errors, _ = validate_system(system_yml)
+        if errors:
+            typer.secho("Validation errors found; profiling may fail:", fg=typer.colors.YELLOW)
+            for e in errors:
+                typer.echo(f"  - {e}")
+    except Exception:
+        # validation is optional; don’t block profiling
+        pass
 
     with Progress() as progress:
         task = progress.add_task("[cyan]Profiling…", total=100)
-        result = profile_system(system_yml, ecology_config, outdir, overwrite=overwrite,
-                                progress_cb=lambda p: progress.update(task, completed=min(100, p)))
-    # Write summary
+        result = profile_system(
+            system_yml,
+            ecology_config,
+            outdir,
+            overwrite=overwrite,
+            progress_cb=lambda p: progress.update(task, completed=min(100, p)),
+        )
+
+    # Write summaries
     (outdir / "profile_summary.csv").write_text(result["summary_csv"])
     if json_out:
         (outdir / "profile_summary.json").write_text(json.dumps(result["summary_json"], indent=2))
+
     typer.secho("✅ Ecology profiling complete.", fg=typer.colors.GREEN)
 
 @app.command("simulate")
