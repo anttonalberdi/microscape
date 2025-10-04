@@ -10,6 +10,7 @@ from ..validate.system import validate_system
 from .profile import app as profile_app
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
+app.add_typer(profile_app, name="") 
 
 # Repository URL used for updates
 REPO_URL = "git+https://github.com/anttonalberdi/microscape.git"
