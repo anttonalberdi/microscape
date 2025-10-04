@@ -7,8 +7,7 @@ from ..runner.snapshot import run_snapshot
 from ..io.graph_config import load_graph_yaml
 from ..viz.graph import scatter_field, interpolate_to_grid
 from ..validate.system import validate_system
-from ..io.system_loader import load_system, iter_spot_files_for_env
-from ..profile.ecology import load_rules, profile_spot
+from .profile import app as profile_app
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -127,69 +126,6 @@ def validate_cmd(
     - writes enriched spot YAMLs under OUTDIR mirroring the original layout
     - writes profile_summary.csv (and .json if requested)
 """
-
-@app.command("profile")
-def profile_cmd(
-    system_yml: Path = typer.Argument(..., help="Path to system.yml"),
-    outdir: Path = typer.Option("outputs/profile", help="Directory to write enriched outputs"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Print discovered files"),
-):
-
-    sys_info = load_system(system_yml)
-    root = sys_info["root"]
-    env_files = sys_info["environment_files"]
-    rules_path = sys_info["ecology_cfg"]
-    if not rules_path or not rules_path.exists():
-        typer.secho("❌ Ecology rules not found (system.config.ecology).", fg=typer.colors.RED)
-        raise typer.Exit(2)
-
-    rules = load_rules(rules_path)
-    outdir = Path(outdir); outdir.mkdir(parents=True, exist_ok=True)
-    csv_path = outdir / "profile_summary.csv"
-    json_path = outdir / "profile_summary.json"
-
-    typer.echo("🧭 Profiling ecology")
-    typer.echo(f"  system : {system_yml.resolve()}")
-    typer.echo(f"  rules  : {rules_path}")
-    typer.echo(f"  out    : {outdir.resolve()}")
-
-    headers = ["spot","microbe","abundance"]
-    # infer trait columns from rules
-    for t in (rules.get("ecology",{}).get("traits") or []):
-        tid = t["id"]
-        headers += [f"{tid}_state", f"{tid}_score", f"{tid}_expr_TPM"]
-
-    total_rows = 0
-    env_count = 0
-    with Progress() as progress, open(csv_path, "w", newline="") as f:
-        task = progress.add_task("[cyan]Profiling…", total=None)
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-
-        for env_file in env_files:
-            env_count += 1
-            spot_list = iter_spot_files_for_env(env_file, sys_info["paths"])
-            if verbose:
-                typer.echo(f"  • {env_file.name}: {len(spot_list)} spots")
-            for sid, spath in spot_list:
-                if not spath or not spath.exists():
-                    if verbose:
-                        typer.echo(f"    - SKIP missing spot file: {spath}")
-                    continue
-                rows = profile_spot(spath, rules)
-                for r in rows:
-                    writer.writerow(r)
-                    total_rows += 1
-                progress.advance(task)
-
-    summary = {
-        "n_environments": env_count,
-        "n_spots_processed": total_rows,  # rows count (microbe-spot pairs)
-        "traits": [t["id"] for t in (rules.get("ecology",{}).get("traits") or [])]
-    }
-    json_path.write_text(json.dumps(summary, indent=2))
-    typer.secho("✅ Ecology profiling complete.", fg=typer.colors.GREEN)
-
 
 @app.command("simulate")
 def simulate_cmd(
