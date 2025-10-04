@@ -12,6 +12,9 @@ system:
     blocking:
       block: ["cage1", "cage2"]
 
+  config:
+    ecology: config/ecology.yml
+
   # Global registries for environments, microbes, and metabolites
   registry:
     environments:
