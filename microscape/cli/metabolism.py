@@ -84,7 +84,11 @@ def metabolism_cmd(
     rules: MetabolismRules = load_rules(metab_cfg_path)
 
     # 2) microbe -> SBML mapping
-    microbe_models, warn_models = build_microbe_model_map(sys_info["root"], sys_info["system"].get("registry", {}))
+    microbe_models, warn_models = build_microbe_model_map(
+        sys_info["root"],
+        sys_info["system"],      # pass the whole system object
+        sys_info["paths"],       # so it can honor paths.microbes_dir
+    )
     for w in warn_models:
         typer.secho("WARN: " + w, fg=typer.colors.YELLOW)
     if verbose:
