@@ -1,0 +1,23 @@
+metabolism:
+  solver: glpk                # or 'cplex', 'gurobi' if installed
+  objective: BIOMASS          # fallback if model has no objective set
+
+  # map spot metabolite IDs → exchange reaction IDs in SBMLs
+  metabolite_map:
+    C0001: EX_C0001_e
+    C0002: EX_C0002_e
+    C0003: EX_C0003_e
+    C0004: EX_C0004_e
+    C0005: EX_C0005_e
+    C0006: EX_C0006_e
+    C0007: EX_C0007_e
+    C0008: EX_C0008_e
+    C0009: EX_C0009_e
+    C0010: EX_C0010_e
+
+  # rule to turn mM at a spot into exchange bounds
+  uptake:
+    mode: linear_clip         # linear map concentration to uptake, then clip
+    mM_per_uptake: 1.0        # 1 mM -> 1 mmol/gDW/h (lower bound magnitude)
+    max_uptake: 10.0          # cap uptake at -10
+    secretion_upper: 1000.0   # default upper bound for EX_* secretion

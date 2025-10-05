@@ -9,6 +9,7 @@ system:
 
   config:
     ecology: ecology.yml
+    metabolism: metabolism.yml
 
   paths:
     config_dir: config

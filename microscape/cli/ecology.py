@@ -47,8 +47,8 @@ def ecology_cmd(
             prog.advance(task)
 
     # Write CSV & JSON
-    out_csv = outdir / "profile_summary.csv"
-    out_json = outdir / "profile_summary.json"
+    out_csv = outdir / "ecology_summary.csv"
+    out_json = outdir / "ecology_summary.json"
 
     # Determine a stable header (union of keys)
     header_keys: List[str] = []
