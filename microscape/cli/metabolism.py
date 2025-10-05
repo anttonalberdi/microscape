@@ -5,6 +5,7 @@ import csv, json, typer
 from rich.progress import Progress
 
 from ..io.system_loader import load_system, iter_spot_files_for_env
+from ..io.metabolism_rules import load_rules, MetabolismRules
 from ..profile.metabolism import run_metabolism
 
 app = typer.Typer(add_completion=False)
