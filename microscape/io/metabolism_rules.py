@@ -1,6 +1,6 @@
 # microscape/io/metabolism_rules.py
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Optional, Any
 
@@ -16,13 +16,13 @@ class UptakeConfig:
 class MetabolismRules:
     solver: str = "glpk"
     objective: Optional[str] = None
-    metabolite_map: Dict[str, str] = None
-    uptake: UptakeConfig = UptakeConfig()
+    metabolite_map: Dict[str, str] = field(default_factory=dict)
+    uptake: UptakeConfig = field(default_factory=UptakeConfig)
 
 def load_rules(yaml_path: Path) -> MetabolismRules:
     """
-    Load config/metabolism.yml (or a path set in system.config.metabolism) and
-    return a structured MetabolismRules object.
+    Load config/metabolism.yml (or a path set in system.config.metabolism)
+    and return a structured MetabolismRules object.
     """
     p = Path(yaml_path)
     data = yaml.safe_load(p.read_text())
@@ -30,6 +30,7 @@ def load_rules(yaml_path: Path) -> MetabolismRules:
         raise ValueError(f"{p} does not define a top-level 'metabolism' section")
 
     m: Dict[str, Any] = data["metabolism"] or {}
+
     solver = str(m.get("solver", "glpk"))
     objective = m.get("objective", None)
 
