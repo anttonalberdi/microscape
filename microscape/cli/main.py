@@ -10,11 +10,13 @@ from ..viz.graph import scatter_field, interpolate_to_grid
 from .validate import app as validate_app
 from .ecology import app as ecology_app
 from .metabolism import app as metabolism_app
+from .constrain import app as constrain_app
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(validate_app, name="") 
 app.add_typer(ecology_app, name="") 
 app.add_typer(metabolism_app, name="") 
+app.add_typer(constrain_app, name="constrain")
 
 # Repository URL used for updates
 REPO_URL = "git+https://github.com/anttonalberdi/microscape.git"
