@@ -48,13 +48,30 @@ def constrain_cmd(
     if mode_l not in ("environmental","transcriptional","combined"):
         raise typer.BadParameter("mode must be one of: environmental | transcriptional | combined")
 
-    # Helper to gather default model bounds and reaction types
-    def get_base_bounds(model) -> Dict[str, Tuple[float,float,str]]:
-        out: Dict[str, Tuple[float,float,str]] = {}
+    def _rxn_type(r) -> str:
+        # Fast path by naming convention
+        if r.id.startswith("EX_"):
+            return "exchange"
+
+        mets = list(r.metabolites.keys())
+        if len(mets) == 1:
+            # Single-metabolite stoichiometry is typical for exchanges
+            return "exchange"
+
+        comps = {m.compartment for m in mets if hasattr(m, "compartment")}
+        if "e" in comps and any(c != "e" for c in comps):
+            return "transport"
+        if comps == {"e"}:
+            # Edge case: multi-stoich in extracellular only → treat as exchange
+            return "exchange"
+        return "internal"
+    
+    def get_base_bounds(model):
+        out = {}
         for r in model.reactions:
             lb0 = float(r.lower_bound)
             ub0 = float(r.upper_bound)
-            rtype = "exchange" if (r.id.startswith("EX_") or any(m.boundary for m in r.metabolites)) else "internal"
+            rtype = _rxn_type(r)
             out[r.id] = (lb0, ub0, rtype)
         return out
 
