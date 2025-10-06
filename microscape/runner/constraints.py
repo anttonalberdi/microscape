@@ -8,7 +8,23 @@ from cobra.io import read_sbml_model, write_sbml_model
 
 from ..io.system_loader import load_system, iter_spot_files_for_env, read_spot_yaml, read_microbe_yaml
 from ..io.constraint_rules import ConstraintRules
-from ..io.metabolism_rules import expr_to_exchange_bounds  # reuse your uptake mapper (metabolism)
+from ..io.metabolism_rules import (
+    MetabolismRules,
+    expr_to_exchange_bounds,
+    spot_bounds_from_measurements,
+)
+
+def constrain_one(
+    spot: dict,
+    rules: MetabolismRules,
+) -> Dict[str, Tuple[float, float]]:
+    """
+    Build exchange bounds for one spot from its metabolite measurements.
+    Returns { exchange_rxn_id: (lb, ub), ... }.
+    """
+    meas = spot.get("measurements") or {}
+    mets = meas.get("metabolites") or {}
+    return spot_bounds_from_measurements(rules, mets)
 
 def _normalize_expr(expr_map: Dict[str, float], mode: str, constant: float) -> Dict[str, float]:
     if mode == "constant":
