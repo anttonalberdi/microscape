@@ -16,7 +16,7 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(validate_app, name="") 
 app.add_typer(ecology_app, name="") 
 app.add_typer(metabolism_app, name="") 
-app.add_typer(constrain_app, name="constrain")
+app.add_typer(constrain_app, name="")
 
 # Repository URL used for updates
 REPO_URL = "git+https://github.com/anttonalberdi/microscape.git"
