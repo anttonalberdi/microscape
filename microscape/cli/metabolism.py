@@ -63,7 +63,8 @@ def _apply_bounds_from_conc(model, rules: MetabolismRules, spot_mets: Dict[str, 
 def metabolism_cmd(
     system_yml: Path = typer.Argument(..., help="Path to system.yml"),
     outdir: Path = typer.Option("outputs/metabolism", help="Output directory"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Extra logs")
+    constraints: Path = typer.Option(None, "--constraints", help="Optional constraints__*__reactions.json"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Extra logs"),
 ):
     """
     Profile steady-state metabolism per spot×microbe:
@@ -82,6 +83,11 @@ def metabolism_cmd(
         typer.secho("Metabolism rules not found. Ensure system.config.metabolism is set.", fg=typer.colors.RED)
         raise typer.Exit(1)
     rules: MetabolismRules = load_rules(metab_cfg_path)
+
+    detail = None
+    if constraints and constraints.exists():
+        import json
+        detail = json.loads(constraints.read_text())
 
     # 2) microbe -> SBML mapping
     microbe_models, warn_models = build_microbe_model_map(
