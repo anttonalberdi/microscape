@@ -1,150 +1,153 @@
+# microscape/runner/constraints.py
 from __future__ import annotations
-from typing import Dict, List, Tuple
 from pathlib import Path
-import math
-import cobra
-from cobra import Model
+from typing import Dict, List, Tuple, Optional
+import csv
+from dataclasses import dataclass
+
 from cobra.io import read_sbml_model, write_sbml_model
+from cobra import Model
+from cobra.util.solver import linear_reaction_coefficients
 
 from ..io.system_loader import load_system, iter_spot_files_for_env, read_spot_yaml, read_microbe_yaml
-from ..io.constraint_rules import ConstraintRules
 from ..io.metabolism_rules import (
     MetabolismRules,
-    expr_to_exchange_bounds,
-    spot_bounds_from_measurements,
+    mM_to_uptake_bounds,
+    reaction_scale_from_expr,
 )
 
+@dataclass
+class ConstraintResult:
+    spot_id: str
+    microbe: str
+    mode: str        # environmental | transcriptional | combined
+    changed_ex: int
+    changed_internal: int
+    warnings: List[str]
+
+def _apply_environmental(model: Model, spot_mets: Dict[str, float], rules: MetabolismRules) -> Tuple[int, List[str]]:
+    changed = 0
+    warns: List[str] = []
+    fmap = rules.metabolite_map or {}
+    for met_id, conc in (spot_mets or {}).items():
+        ex_id = fmap.get(met_id)
+        if not ex_id:
+            continue
+        rxn = model.reactions.get_by_id(ex_id) if ex_id in model.reactions else None
+        if not rxn:
+            warns.append(f"Missing EX reaction in model: {ex_id}")
+            continue
+        lb, ub = mM_to_uptake_bounds(float(conc), rules.uptake)
+        rxn.lower_bound = lb
+        rxn.upper_bound = ub
+        changed += 1
+    return changed, warns
+
+def _apply_transcriptional(model: Model, gene_expr: Dict[str, float], rules: MetabolismRules) -> Tuple[int, List[str]]:
+    changed = 0
+    warns: List[str] = []
+    for rxn in model.reactions:
+        # Skip exchange reactions (id starts with EX_ in your toy schema)
+        if rxn.id.startswith("EX_"):
+            continue
+        scale = reaction_scale_from_expr(rxn, gene_expr, rules.transcription)
+        if scale >= 0.999:
+            continue
+        # scale both bounds symmetrically
+        lb0, ub0 = rxn.lower_bound, rxn.upper_bound
+        rxn.lower_bound = lb0 * scale
+        rxn.upper_bound = ub0 * scale
+        changed += 1
+    return changed, warns
+
+def _collect_spot_gene_expr(spot_obj: dict, microbe_id: str) -> Dict[str, float]:
+    """
+    Expecting in spot YAML:
+      spot.measurements.transcripts.values.Mxxxx.Gyyyy: TPM
+    """
+    meas = (spot_obj.get("measurements") or {})
+    tx = (meas.get("transcripts") or {})
+    vals = (tx.get("values") or {})
+    per_microbe = vals.get(microbe_id) or {}
+    # keys are gene IDs; values numeric TPM
+    return {str(k): float(v) for k, v in per_microbe.items()}
+
 def constrain_one(
-    spot: dict,
+    system_yml: Path,
     rules: MetabolismRules,
-) -> Dict[str, Tuple[float, float]]:
-    """
-    Build exchange bounds for one spot from its metabolite measurements.
-    Returns { exchange_rxn_id: (lb, ub), ... }.
-    """
-    meas = spot.get("measurements") or {}
-    mets = meas.get("metabolites") or {}
-    return spot_bounds_from_measurements(rules, mets)
+    out_csv: Path,
+    mode: str = "environmental",
+    write_models: bool = False,
+    models_outdir: Optional[Path] = None,
+    verbose: bool = False
+) -> List[ConstraintResult]:
 
-def _normalize_expr(expr_map: Dict[str, float], mode: str, constant: float) -> Dict[str, float]:
-    if mode == "constant":
-        denom = constant if constant > 0 else 1.0
-        return {g: (v/denom) for g,v in expr_map.items()}
-    vmax = max(expr_map.values()) if expr_map else 1.0
-    if vmax <= 0: vmax = 1.0
-    return {g: (v/vmax) for g,v in expr_map.items()}
+    sys_info = load_system(system_yml)
+    env_files = sys_info["environment_files"]
 
-def _reaction_activity_from_gpr(rx: cobra.Reaction, g2a: Dict[str, float]) -> float:
-    """
-    Simple rule:
-      - If GPR is empty: return 1.0 (unconstrained)
-      - AND groups -> min
-      - OR between genes -> max
-    We rely on reaction.gene_reaction_rule already parsed by cobrapy.
-    """
-    rule = (rx.gene_reaction_rule or "").strip()
-    if not rule:
-        # If the model used fbc associations but rule didn't parse, fall back to any gene present
-        if rx.genes:
-            vals = [g2a.get(g.id, 0.0) for g in rx.genes]
-            return max(vals) if vals else 1.0
-        return 1.0
-
-    # very simple parser: split by 'or' first, then each token can contain 'and'
-    # NOTE: This is a simplification; for complex parentheses use sympy parsing later.
-    ors = [t.strip() for t in rule.replace("OR","or").replace("AND","and").split("or")]
-    alt_vals = []
-    for term in ors:
-        and_genes = [g.strip() for g in term.split("and")]
-        and_vals = [g2a.get(g, 0.0) for g in and_genes if g]
-        if not and_vals:
-            alt_vals.append(0.0)
-        else:
-            alt_vals.append(min(and_vals))
-    return max(alt_vals) if alt_vals else 1.0
-
-def _scale_bounds_by_activity(rx: cobra.Reaction, activity: float,
-                              min_irrev_ub: float, min_rev_mag: float):
-    lb, ub = rx.lower_bound, rx.upper_bound
-    # Exchange reactions handled elsewhere—still safe to scale transports/internals
-    if lb >= 0.0:  # irreversible forward
-        new_ub = max(min_irrev_ub, ub * activity)
-        rx.upper_bound = new_ub
-        # keep lb (often 0); if you want proportional lb too, do it here
-    elif ub <= 0.0:  # irreversible reverse
-        new_lb = min(-min_irrev_ub, lb * activity) if min_irrev_ub > 0 else (lb * activity)
-        rx.lower_bound = new_lb
-    else:  # reversible
-        # scale magnitude symmetrically
-        rx.lower_bound = lb * activity
-        rx.upper_bound = ub * activity
-        if min_rev_mag > 0:
-            if rx.lower_bound < 0:
-                rx.lower_bound = min(rx.lower_bound, -min_rev_mag)
-            if rx.upper_bound > 0:
-                rx.upper_bound = max(rx.upper_bound,  min_rev_mag)
-
-def _apply_exchange_from_spot(model: Model, spot_mets: Dict[str, float], rules: ConstraintRules):
-    if not rules.uptake.enabled:
-        return
-    fmap = rules.uptake.metabolite_map
-    for mid, conc in (spot_mets or {}).items():
-        ex_id = fmap.get(mid)
-        if not ex_id or ex_id not in model.reactions:
+    # Build microbe → model path from registry
+    microbe_models: Dict[str, Path] = {}
+    for m in (sys_info["system"].get("registry") or {}).get("microbes", []):
+        mid = m.get("id")
+        mf = m.get("file")
+        if not mid or not mf:
             continue
-        rx = model.reactions.get_by_id(ex_id)
-        # uptake is negative LB, secretion upper as usual
-        uptake_mag = min(rules.uptake.max_uptake, max(0.0, conc * rules.uptake.mM_per_uptake))
-        rx.lower_bound = -uptake_mag
-        rx.upper_bound = rules.uptake.secretion_upper
+        myml = (sys_info["root"] / mf).resolve()
+        md = read_microbe_yaml(myml)  # raises if bad
+        model_path = (myml.parent / (md["microbe"]["model"]["path"])).resolve()
+        microbe_models[mid] = model_path
 
-def constrain_one(model_path: Path,
-                  gene_expr: Dict[str, float],  # gene -> TPM for this microbe at this spot
-                  spot_mets: Dict[str, float],  # metabolite id -> concentration
-                  rules: ConstraintRules,
-                  out_model_path: Path | None) -> Tuple[Model, List[dict]]:
-    """
-    Returns (constrained_model, per-reaction report rows)
-    """
-    m = read_sbml_model(str(model_path))
+    results: List[ConstraintResult] = []
 
-    # Normalize gene expression to 0..1
-    norm_mode = rules.gpr_activity.normalize.mode
-    const = rules.gpr_activity.normalize.constant
-    g_norm = _normalize_expr(gene_expr, norm_mode, const)
-    # Threshold + clamp
-    th = rules.gpr_activity.threshold_TPM
-    cap = rules.gpr_activity.cap_activity
-    floor = rules.gpr_activity.floor_activity
-    g_act = {g: max(floor, min(cap, (0.0 if v*const < th and norm_mode=="constant" else v))) for g,v in g_norm.items()}
-    # (If mode != constant, thresholding is on raw TPM before normalization; adapt if you prefer that convention.)
+    # CSV
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with out_csv.open("w", newline="") as fh:
+        w = csv.writer(fh, delimiter="\t")
+        w.writerow(["spot_id", "microbe", "mode", "changed_ex", "changed_internal", "warnings"])
 
-    # Apply exchange bounds from spot metab (optional)
-    _apply_exchange_from_spot(m, spot_mets, rules)
+        for env_file in env_files:
+            for sid, spot_path in iter_spot_files_for_env(env_file, sys_info["paths"]):
+                spot = read_spot_yaml(spot_path)
+                # spot metabolites
+                mets = ((spot.get("measurements") or {}).get("metabolites") or {}).get("values") or {}
+                for microbe, model_path in microbe_models.items():
+                    try:
+                        model = read_sbml_model(str(model_path))
+                    except Exception as e:
+                        w.writerow([sid, microbe, mode, 0, 0, f"SBML load error: {e}"])
+                        continue
 
-    # Scale internal (and transport) reactions via GPR activity
-    rows: List[dict] = []
-    for rx in m.reactions:
-        if rx.id.startswith("EX_"):
-            # handled above; still record activity=1.0 for transparency
-            rows.append({
-                "reaction": rx.id, "kind": "exchange",
-                "lb_old": None, "ub_old": None, "lb_new": rx.lower_bound, "ub_new": rx.upper_bound,
-                "activity": 1.0
-            })
-            continue
-        lb_old, ub_old = rx.lower_bound, rx.upper_bound
-        a = _reaction_activity_from_gpr(rx, g_act)
-        _scale_bounds_by_activity(rx, a, rules.bound_scaling.min_irrev_ub, rules.bound_scaling.min_rev_mag)
-        rows.append({
-            "reaction": rx.id, "kind": "internal",
-            "lb_old": lb_old, "ub_old": ub_old, "lb_new": rx.lower_bound, "ub_new": rx.upper_bound,
-            "activity": a
-        })
+                    changed_ex = changed_internal = 0
+                    warns_all: List[str] = []
 
-    # Optionally write constrained model
-    if out_model_path is not None:
-        out_model_path.parent.mkdir(parents=True, exist_ok=True)
-        write_sbml_model(m, str(out_model_path))
+                    if mode in ("environmental", "combined"):
+                        ex_changed, warns = _apply_environmental(model, mets, rules)
+                        changed_ex += ex_changed
+                        warns_all += warns
 
-    return m, rows
+                    if mode in ("transcriptional", "combined"):
+                        gene_expr = _collect_spot_gene_expr(spot, microbe)
+                        int_changed, warns = _apply_transcriptional(model, gene_expr, rules)
+                        changed_internal += int_changed
+                        warns_all += warns
+
+                    # Optionally write constrained model
+                    if write_models:
+                        models_outdir = models_outdir or (out_csv.parent / "models_constrained")
+                        models_outdir.mkdir(parents=True, exist_ok=True)
+                        out_model = models_outdir / f"{sid}__{microbe}.xml"
+                        try:
+                            write_sbml_model(model, str(out_model))
+                        except Exception as e:
+                            warns_all.append(f"Write SBML failed: {e}")
+
+                    # write row
+                    warn_str = "; ".join(warns_all) if warns_all else ""
+                    w.writerow([sid, microbe, mode, changed_ex, changed_internal, warn_str])
+
+                    results.append(ConstraintResult(
+                        spot_id=sid, microbe=microbe, mode=mode,
+                        changed_ex=changed_ex, changed_internal=changed_internal,
+                        warnings=warns_all
+                    ))
+    return results

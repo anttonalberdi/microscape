@@ -2,87 +2,118 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, Optional, Tuple, Iterable
 import yaml
-
-__all__ = [
-    "UptakeConfig",
-    "MetabolismRules",
-    "load_rules",
-    "expr_to_exchange_bounds",
-    "spot_bounds_from_measurements",
-]
+import numpy as np
 
 @dataclass
 class UptakeConfig:
-    mode: str = "linear_clip"     # currently supported: linear_clip
-    mM_per_uptake: float = 1.0    # mM -> mmol/gDW/h conversion (lower bound magnitude)
-    max_uptake: float = 10.0      # cap |LB| at this value
-    secretion_upper: float = 1000.0  # default UB for secretion
+    mode: str = "linear_clip"     # linear_clip | linear | cap_only
+    mM_per_uptake: float = 1.0
+    max_uptake: float = 10.0
+    secretion_upper: float = 1000.0
+
+@dataclass
+class TranscriptionConfig:
+    mode: str = "eflux"           # eflux | threshold
+    threshold_TPM: float = 10.0
+    eflux_norm: str = "max"       # max | percentile
+    percentile: float = 95.0      # used if eflux_norm == percentile
+    min_scale: float = 0.0        # floor (0.0-1.0) when expression near zero
 
 @dataclass
 class MetabolismRules:
     solver: str = "glpk"
     objective: Optional[str] = None
-    metabolite_map: Dict[str, str] = field(default_factory=dict)  # spot metabolite ID -> EX_rxn ID
+    metabolite_map: Dict[str, str] = field(default_factory=dict)  # spot metabolite → EX id
     uptake: UptakeConfig = field(default_factory=UptakeConfig)
+    transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
 
-def _read_yaml(p: Path) -> dict:
-    with Path(p).open("r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
-
-def load_rules(yml_path: Path) -> MetabolismRules:
-    d = _read_yaml(Path(yml_path))
-    m = (d.get("metabolism") or {})
-    uptake = UptakeConfig(**(m.get("uptake") or {}))
+def load_rules(yaml_path: Path) -> MetabolismRules:
+    data = yaml.safe_load(Path(yaml_path).read_text())
+    metab = (data.get("metabolism") or {})
+    # environmental
+    uptake = UptakeConfig(**(metab.get("uptake") or {}))
+    # transcriptional
+    transcription = TranscriptionConfig(**(metab.get("transcription") or {}))
     return MetabolismRules(
-        solver = m.get("solver", "glpk"),
-        objective = m.get("objective"),
-        metabolite_map = dict(m.get("metabolite_map") or {}),
+        solver = metab.get("solver", "glpk"),
+        objective = metab.get("objective"),
+        metabolite_map = (metab.get("metabolite_map") or {}),
         uptake = uptake,
+        transcription = transcription,
     )
 
-def expr_to_exchange_bounds(
-    rules: MetabolismRules,
-    metabolite_id: str,
-    concentration_mM: float,
-) -> Optional[Tuple[str, float, float]]:
-    """
-    Map a *single* spot metabolite to its exchange bounds.
-    Returns (exchange_rxn_id, lb, ub) or None if metabolite not mapped.
-    - lb <= 0 (consumption allowed as negative flux)
-    - ub >= 0 (secretion upper bound)
-    """
-    ex_id = rules.metabolite_map.get(metabolite_id)
-    if not ex_id:
-        return None
-    conc = max(0.0, float(concentration_mM))
-    if rules.uptake.mode == "linear_clip":
-        lb_mag = conc * float(rules.uptake.mM_per_uptake)
-        lb = -min(lb_mag, float(rules.uptake.max_uptake))
-        ub = float(rules.uptake.secretion_upper)
-    else:
-        # Fallback: no consumption allowed, only secretion
-        lb = 0.0
-        ub = float(rules.uptake.secretion_upper)
-    return ex_id, lb, ub
+# ---------- Environmental mapping (mM -> EX bounds) ----------
 
-def spot_bounds_from_measurements(
-    rules: MetabolismRules,
-    metabolites_block: Dict[str, Any],
-) -> Dict[str, Tuple[float, float]]:
+def mM_to_uptake_bounds(mM: float, cfg: UptakeConfig) -> Tuple[float, float]:
     """
-    Given a spot's `measurements.metabolites` block:
-      { unit: "mM", values: { C0001: 5.2, ... } }
-    return { "EX_*": (lb, ub), ... } using rules.
+    Convert concentration (mM) to (lb, ub) for an EX reaction (uptake is negative).
     """
-    if not metabolites_block:
-        return {}
-    values = (metabolites_block.get("values") or {}) if isinstance(metabolites_block, dict) else {}
-    bounds: Dict[str, Tuple[float, float]] = {}
-    for met_id, conc in values.items():
-        res = expr_to_exchange_bounds(rules, met_id, float(conc))
-        if res:
-            ex_id, lb, ub = res
-            bounds[ex_id] = (lb, ub)
-    return bounds
+    if cfg.mode == "cap_only":
+        lb = -min(mM, cfg.max_uptake)
+    else:
+        rate = mM * cfg.mM_per_uptake
+        if cfg.mode == "linear_clip":
+            rate = min(rate, cfg.max_uptake)
+        lb = -rate
+    ub = cfg.secretion_upper
+    return (lb, ub)
+
+# ---------- Transcriptional mapping (TPM -> reaction scaling) ----------
+
+def _eval_gpr(reaction, gene_expr: Dict[str, float], threshold: float) -> float:
+    """
+    Compute an expression score for a reaction using GPR:
+    - For AND: min(gene expr)
+    - For OR:  max(gene expr)
+    Fall back to max gene among reaction.genes if no rule string.
+    """
+    # If COBRApy parsed .genes/.gene_reaction_rule is available:
+    # Use a simple heuristic: if 'and' in rule -> min; if 'or' -> max.
+    rule = getattr(reaction, "gene_reaction_rule", "") or ""
+    if rule:
+        # tokenise: crude but OK for toy models (lowercase 'and'/'or')
+        rule_l = rule.lower()
+        genes = [g.id for g in getattr(reaction, "genes", [])]
+        vals = [gene_expr.get(g, 0.0) for g in genes]
+        if not vals:
+            return 0.0
+        if " and " in rule_l:
+            return float(min(vals))
+        if " or " in rule_l:
+            return float(max(vals))
+        return float(max(vals))
+    else:
+        genes = [g.id for g in getattr(reaction, "genes", [])]
+        if not genes:
+            return 0.0
+        return float(max(gene_expr.get(g, 0.0) for g in genes))
+
+def reaction_scale_from_expr(
+    reaction,
+    gene_expr: Dict[str, float],
+    cfg: TranscriptionConfig
+) -> float:
+    """
+    Return a [0,1] scale for reaction bounds based on expression and GPR.
+    """
+    score = _eval_gpr(reaction, gene_expr, cfg.threshold_TPM)
+
+    if cfg.mode == "threshold":
+        return 1.0 if score >= cfg.threshold_TPM else 0.0
+
+    # eflux mode: scale by normalised expression
+    genes = [g.id for g in getattr(reaction, "genes", [])]
+    if not genes:
+        return 1.0  # no GPR -> leave unconstrained
+
+    gene_vals = np.array([gene_expr.get(g, 0.0) for g in genes], dtype=float)
+    if cfg.eflux_norm == "percentile":
+        denom = np.percentile(gene_vals, cfg.percentile) if len(gene_vals) else 1.0
+    else:
+        denom = float(gene_vals.max()) if len(gene_vals) else 1.0
+    denom = max(denom, 1e-6)
+    scale = float(score / denom)
+    scale = max(cfg.min_scale, min(1.0, scale))
+    return scale
