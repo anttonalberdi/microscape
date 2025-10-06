@@ -92,7 +92,10 @@ def constrain_one(
         mf = m.get("file")
         if not mid or not mf:
             continue
-        myml = (sys_info["root"] / mf).resolve()
+        microbes_dir = Path(sys_info["paths"]["microbes_dir"])
+        myml = (microbes_dir / mf).resolve()
+        md = read_microbe_yaml(myml)
+        model_path = (myml.parent / md["microbe"]["model"]["path"]).resolve()
         md = read_microbe_yaml(myml)  # raises if bad
         model_path = (myml.parent / (md["microbe"]["model"]["path"])).resolve()
         microbe_models[mid] = model_path
