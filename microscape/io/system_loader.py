@@ -142,12 +142,43 @@ def iter_spot_files_for_env(env_file: Path, sys_paths: Dict) -> List[Tuple[str, 
             out.append((p.stem, p.resolve()))
     return out
 
-# Convenience readers (used by CLI/runners)
 def read_spot_yaml(spot_path: Path) -> dict:
     return _read_yaml(spot_path).get("spot") or {}
 
 def read_environment_yaml(env_path: Path) -> dict:
     return _read_yaml(env_path).get("environment") or {}
 
-def read_microbe_yaml(microbe_path: Path) -> dict:
-    return _read_yaml(microbe_path)
+def read_microbe_yaml(mid: str, sys_info: dict) -> dict | None:
+    """
+    Load a microbe YAML given its ID and the system info (to resolve paths).
+    Returns the parsed YAML with an extra key '__file__' pointing to its file path.
+    """
+    microbes_dir = Path(sys_info["paths"].get("microbes_dir") or "microbes")
+    root = Path(sys_info["root"])
+    m_path = None
+
+    # Resolve from registry
+    registry = ((sys_info.get("system") or {}).get("registry") or {}).get("microbes", [])
+    for entry in registry:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("id") == mid:
+            m_path = entry.get("file")
+            if m_path:
+                m_path = Path(m_path)
+                if not m_path.is_absolute():
+                    m_path = root / microbes_dir / m_path
+            break
+
+    # fallback if not found
+    if not m_path:
+        candidate = root / microbes_dir / f"{mid}.yml"
+        if candidate.exists():
+            m_path = candidate
+
+    if not m_path or not m_path.exists():
+        return None
+
+    data = _read_yaml(m_path)
+    data["__file__"] = str(m_path)
+    return data
