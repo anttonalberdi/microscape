@@ -4,8 +4,6 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 import yaml
 
-# ---------- utils ----------
-
 def _read_yaml(p: Path) -> dict:
     with p.open("r", encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
@@ -30,116 +28,79 @@ def _resolve_under_dir(root: Path, dir_from_paths: Optional[str], entry_file: st
 # ---------- public API ----------
 
 def load_system(system_yml: Path) -> dict:
-    """
-    Loads system.yml and returns:
-      {
-        "root": <Path>,
-        "system": <dict>,
-        "paths": <dict>,
-        "ecology_cfg": <Path | None>,
-        "metabolism_cfg": <Path | None>,
-        "environment_files": [Path, ...],
-        "microbe_files": [Path, ...],
-      }
-    All paths are resolved relative to system.yml and the configured dirs.
-    """
     system_yml = Path(system_yml).resolve()
     root = system_yml.parent
-    sysd = _read_yaml(system_yml).get("system") or {}
+    sysd = _read_yaml(system_yml)["system"]
 
     paths: Dict = sysd.get("paths") or {}
+    envs_dir = _resolve(root, paths.get("environments_dir")) or (root / "environments")
     config_dir = _resolve(root, paths.get("config_dir")) or (root / "config")
-    envs_dir   = _resolve(root, paths.get("environments_dir")) or (root / "environments")
     spots_dir  = _resolve(root, paths.get("spots_dir")) or (root / "spots")
     microbes_dir = _resolve(root, paths.get("microbes_dir")) or (root / "microbes")
 
-    # Configs
-    cfg_block = sysd.get("config") or {}
-    ecology_cfg    = _resolve(config_dir, cfg_block.get("ecology")) if cfg_block.get("ecology") else None
-    metabolism_cfg = _resolve(config_dir, cfg_block.get("metabolism")) if cfg_block.get("metabolism") else None
+    ecology_rel = (sysd.get("config") or {}).get("ecology")
+    metab_rel   = (sysd.get("config") or {}).get("metabolism")
+    ecology_cfg = _resolve(config_dir, ecology_rel) if ecology_rel else None
+    metab_cfg   = _resolve(config_dir, metab_rel) if metab_rel else None
 
-    # Registry
-    reg = sysd.get("registry") or {}
-    env_specs = reg.get("environments") or []
-    mic_specs = reg.get("microbes") or []
+    env_specs = ((sysd.get("registry") or {}).get("environments") or [])
+    microbe_specs = ((sysd.get("registry") or {}).get("microbes") or [])
 
-    # Resolve environment files
     env_files: List[Path] = []
-    for e in env_specs:
-        if isinstance(e, str):
-            # "E001" or "E001.yml"
-            fname = e if e.endswith(".yml") else f"{e}.yml"
-            env_files.append(envs_dir / fname)
-        elif isinstance(e, dict):
-            fid = e.get("file") or (f"{e.get('id')}.yml" if e.get("id") else None)
-            if fid:
-                env_files.append(_resolve_under_dir(root, paths.get("environments_dir"), fid, "environments"))
-    env_files = [p.resolve() for p in env_files if p and p.exists()]
+    for item in env_specs:
+        if isinstance(item, str):
+            env_files.append(_resolve(envs_dir, item if item.endswith(".yml") else f"{item}.yml"))
+        elif isinstance(item, dict):
+            fid = item.get("file") or f"{item.get('id')}.yml"
+            env_files.append(_resolve(envs_dir, fid))
+    env_files = [p for p in env_files if p and p.exists()]
 
-    # Resolve microbe files
-    microbe_files: List[Path] = []
-    for m in mic_specs:
-        if isinstance(m, str):
-            fname = m if m.endswith(".yml") else f"{m}.yml"
-            microbe_files.append(microbes_dir / fname)
-        elif isinstance(m, dict):
-            fid = m.get("file") or (f"{m.get('id')}.yml" if m.get("id") else None)
-            if fid:
-                microbe_files.append(_resolve_under_dir(root, paths.get("microbes_dir"), fid, "microbes"))
-    microbe_files = [p.resolve() for p in microbe_files if p and p.exists()]
+    microbe_files: Dict[str, Path] = {}
+    for item in microbe_specs:
+        if not isinstance(item, dict): continue
+        mid = item.get("id"); mf = item.get("file")
+        if not mid or not mf: continue
+        mp = _resolve(microbes_dir, mf)
+        if mp and mp.exists():
+            microbe_files[mid] = mp
 
     return {
         "root": root,
         "system": sysd,
         "paths": {
-            "config_dir": str(config_dir),
-            "environments_dir": str(envs_dir),
-            "spots_dir": str(spots_dir),
-            "microbes_dir": str(microbes_dir),
+            "envs_dir": envs_dir, "config_dir": config_dir,
+            "spots_dir": spots_dir, "microbes_dir": microbes_dir
         },
-        "ecology_cfg": ecology_cfg,
-        "metabolism_cfg": metabolism_cfg,
+        "configs": {"ecology": ecology_cfg, "metabolism": metab_cfg},
         "environment_files": env_files,
         "microbe_files": microbe_files,
     }
 
 def iter_spot_files_for_env(env_file: Path, sys_paths: Dict) -> List[Tuple[str, Path]]:
-    """
-    Returns [(spot_id, spot_path), ...] for an environment YAML.
-    Resolution priority:
-      1) env.spots_dir (relative to env file)
-      2) system.paths.spots_dir (relative to system root)
-      3) <env_file_dir>/spots
-    If env lists explicit {id,file}, resolve those relative to chosen spots_dir.
-    """
-    env = _read_yaml(env_file).get("environment") or {}
+    env = _read_yaml(env_file)["environment"]
     base = env_file.parent
-
-    # Candidates
     env_spots_dir = env.get("spots_dir")
     sys_spots_dir = sys_paths.get("spots_dir")
     if env_spots_dir:
         spots_base = _resolve(base, env_spots_dir)
     elif sys_spots_dir:
-        spots_base = Path(sys_spots_dir)
+        spots_base = sys_spots_dir
     else:
         spots_base = base / "spots"
 
     out: List[Tuple[str, Path]] = []
     if env.get("spots"):
         for s in env["spots"]:
-            sid = s.get("id")
-            f   = s.get("file")
-            if not sid or not f:
-                continue
+            sid = s.get("id"); f = s.get("file")
+            if not sid or not f: continue
             p = Path(f)
-            spath = (spots_base / p) if not p.is_absolute() else p
-            out.append((sid, spath.resolve()))
+            spath = (spots_base / p) if (p.parent == Path(".")) else _resolve(base, f)
+            out.append((sid, spath))
         return out
 
     if spots_base and spots_base.exists():
         for p in sorted(spots_base.glob("*.yml")):
-            out.append((p.stem, p.resolve()))
+            out.append((p.stem, p))
     return out
 
 def read_spot_yaml(spot_path: Path) -> dict:
@@ -182,3 +143,18 @@ def read_microbe_yaml(mid: str, sys_info: dict) -> dict | None:
     data = _read_yaml(m_path)
     data["__file__"] = str(m_path)
     return data
+
+def spot_transcripts(spot: dict) -> Dict[str, Dict[str, float]]:
+    """Return {microbe_id: {gene_id: TPM}} from a spot dict."""
+    tr = ((spot.get("measurements") or {}).get("transcripts") or {})
+    vals = tr.get("values") or {}
+    out = {}
+    for mid, gmap in vals.items():
+        if not isinstance(gmap, dict): continue
+        out[str(mid)] = {str(g): float(v) for g, v in gmap.items()}
+    return out
+
+def spot_metabolites(spot: dict) -> Dict[str, float]:
+    mets = ((spot.get("measurements") or {}).get("metabolites") or {})
+    vals = mets.get("values") or {}
+    return {str(k): float(v) for k, v in vals.items()}
