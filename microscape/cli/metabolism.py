@@ -16,18 +16,39 @@ from ..io.spot_loader import load_spot
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 @contextmanager
-def _suppress_no_objective_on_read():
+def _silence_sbml_load_warnings():
+    """
+    Silence *all* warnings and logger noise while reading SBML.
+    Scope is limited to the 'with' block; state is restored afterwards.
+    """
+    # Silence Python warnings
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message=r"No objective coefficients in model. Unclear what should be optimized")
-        prev_cobra = logging.getLogger("cobra").level
-        prev_optlang = logging.getLogger("optlang").level
-        logging.getLogger("cobra").setLevel(logging.ERROR)
-        logging.getLogger("optlang").setLevel(logging.ERROR)
+        warnings.simplefilter("ignore")
+
+        # Temporarily raise log levels & stop propagation for cobra/optlang
+        logger_names = (
+            "",  # root
+            "cobra",
+            "cobra.io",
+            "cobra.core",
+            "cobra.util",
+            "optlang",
+            "optlang.interface",
+        )
+        loggers = [logging.getLogger(n) for n in logger_names]
+        prev = [(lg.level, lg.propagate) for lg in loggers]
         try:
+            for lg in loggers:
+                lg.setLevel(logging.CRITICAL)
+                lg.propagate = False
             yield
         finally:
-            logging.getLogger("cobra").setLevel(prev_cobra)
-            logging.getLogger("optlang").setLevel(prev_optlang)
+            for lg, (lvl, prop) in zip(loggers, prev):
+                try:
+                    lg.setLevel(lvl)
+                    lg.propagate = prop
+                except Exception:
+                    pass
 
 def _set_solver(model, solver: str):
     try:
@@ -274,7 +295,7 @@ def metabolism_cmd(
                         continue
                     # Load SBML
                     try:
-                        with _suppress_no_objective_on_read():
+                        with _silence_sbml_load_warnings():
                             model = cobra.io.read_sbml_model(str(sbml_path))
                     except Exception as e:
                         per_microbe[mid] = {"status": "sbml_load_error", "detail": str(e)}
