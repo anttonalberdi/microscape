@@ -47,7 +47,6 @@ def _iter_spots_for_env_via_system(env_file: Path, sys_info: Dict) -> List[Tuple
     Return [(spot_id, spot_path), ...] for the given environment file,
     by scanning the spots_dir configured in system.yml and selecting those
     whose spot.env_id matches this environment's id.
-    This avoids any accidental search under the environments directory.
     """
     env_doc = yaml.safe_load(Path(env_file).read_text()) or {}
     env = env_doc.get("environment") or {}
@@ -190,14 +189,15 @@ def constrain_cmd(
         help="Constraint source: environmental | transcriptional | combined",
     ),
     outdir: Path = typer.Option("outputs/constraints", help="Output directory"),
-    write_json: bool = typer.Option(True, "--json/--no-json", help="Write per-reaction JSON"),
+    write_json: bool = typer.Option(True, "--json/--no-json", help="Write JSON outputs"),
     write_csv: bool = typer.Option(True, "--csv/--no-csv", help="Write summary TSV"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Extra logs"),
 ):
     """
     Build constraints for each spot×microbe and write:
       - summary TSV (one row per spot×microbe)
-      - detailed per-reaction JSON (consumable by metabolism)
+      - detailed JSON (debug)
+      - compact constraints JSON (for `microscape metabolism --constraints`)
     """
     sys_info = load_system(system_yml)
     env_files = sys_info["environment_files"]
@@ -207,11 +207,22 @@ def constrain_cmd(
     rules: Optional[MetabolismRules] = load_rules(metab_cfg_path) if metab_cfg_path else None
 
     summary_rows: List[Dict] = []
-    detail_nested: Dict = {
+
+    # detailed/debug JSON (rich info)
+    debug_nested: Dict = {
         "system": str(system_yml.resolve()),
         "mode": mode.lower(),
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "spots": {},
+    }
+
+    # compact JSON strictly for metabolism (final bounds only; changed reactions)
+    metab_nested: Dict = {
+        "version": 1,
+        "system": str(system_yml.resolve()),
+        "mode": mode.lower(),
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "spots": {}  # spots[spot_id].microbes[microbe_id].reactions[rxn_id] = {"lb": .., "ub": ..}
     }
 
     mode_l = mode.lower()
@@ -221,11 +232,12 @@ def constrain_cmd(
     with Progress() as prog:
         task = prog.add_task("[cyan]Constraining…", total=len(env_files))
         for env_file in env_files:
-            # ✅ FIX: enumerate spots from system.yml's spots_dir, filtered by env_id
+            # Spot discovery anchored to system.yml's paths.spots_dir
             spot_pairs = _iter_spots_for_env_via_system(env_file, sys_info)
             env_doc = yaml.safe_load(Path(env_file).read_text()) or {}
             env_id = (env_doc.get("environment") or {}).get("id") or Path(env_file).stem
-            detail_nested["spots"].setdefault(env_id, {"spots": {}})
+
+            debug_nested["spots"].setdefault(env_id, {"spots": {}})
 
             for sid, spot_path in spot_pairs:
                 spot = read_spot_yaml(spot_path) or {}
@@ -233,6 +245,9 @@ def constrain_cmd(
 
                 met_vals = ((spot.get("measurements") or {}).get("metabolites") or {}).get("values") or {}
                 microbes_vals = ((spot.get("measurements") or {}).get("microbes") or {}).get("values") or {}
+
+                # set up metab JSON node
+                metab_spot = metab_nested["spots"].setdefault(sid, {"microbes": {}})
 
                 for mid in microbes_vals.keys():
                     myml = read_microbe_yaml(mid, sys_info)
@@ -273,13 +288,19 @@ def constrain_cmd(
                     summary_row["mode"] = mode_l
                     summary_rows.append(summary_row)
 
-                    dspot = detail_nested["spots"][env_id]["spots"].setdefault(sid, {"microbes": {}})
+                    # ----- detailed debug JSON -----
+                    dspot = debug_nested["spots"][env_id]["spots"].setdefault(sid, {"microbes": {}})
                     dmic = dspot["microbes"].setdefault(mid, {"reactions": {}, "summary": {}})
+                    # also prepare metab JSON node
+                    mnode = metab_spot["microbes"].setdefault(mid, {"reactions": {}})
+
                     for rr in reaction_rows:
-                        rid = rr.pop("react_id")
-                        rtype = rr.pop("type")
-                        entry = {
-                            "type": rtype,
+                        rid = rr["react_id"]
+                        # rich record for humans
+                        dmic["reactions"][rid] = {
+                            "type": rr["rtype"],
+                            "lb0": rr["lb0"],
+                            "ub0": rr["ub0"],
                             "lb_env": rr["lb_env"],
                             "ub_env": rr["ub_env"],
                             "lb_tx": rr["lb_tx"],
@@ -289,7 +310,13 @@ def constrain_cmd(
                             "changed": rr["changed"],
                             "notes": rr["notes"],
                         }
-                        dmic["reactions"][rid] = entry
+                        # compact record for metabolism (only changed reactions)
+                        if rr["changed"]:
+                            mnode["reactions"][rid] = {
+                                "lb": rr["lb_final"],
+                                "ub": rr["ub_final"],
+                            }
+
                     dmic["summary"] = {
                         "changed_ex": summary_row["changed_ex"],
                         "changed_internal": summary_row["changed_internal"],
@@ -298,7 +325,9 @@ def constrain_cmd(
 
             prog.advance(task)
 
+    # ---------- write outputs ----------
     stem = f"constraints__{mode_l}"
+
     if write_csv:
         tsv = outdir / f"{stem}.tsv"
         with tsv.open("w", newline="") as fh:
@@ -309,8 +338,15 @@ def constrain_cmd(
         typer.echo(f"Summary TSV : {tsv}")
 
     if write_json:
-        jpath = outdir / f"{stem}__reactions.json"
-        jpath.write_text(json.dumps(detail_nested, indent=2))
-        typer.echo(f"Detail JSON: {jpath}")
+        # Detailed debug JSON (keeps rich info you already had)
+        j_debug = outdir / f"{stem}__debug.json"
+        j_debug.write_text(json.dumps(debug_nested, indent=2))
+        typer.echo(f"Debug JSON  : {j_debug}")
+
+        # Compact constraints JSON for metabolism
+        # NOTE: name aligns with `--constraints` help ("constraints__*__reactions.json")
+        j_metab = outdir / f"{stem}__reactions.json"
+        j_metab.write_text(json.dumps(metab_nested, indent=2))
+        typer.echo(f"Metab JSON  : {j_metab}")
 
     typer.secho("✅ Constraints built.", fg=typer.colors.GREEN)
