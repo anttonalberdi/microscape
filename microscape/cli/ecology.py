@@ -5,7 +5,7 @@ from typing import List
 import json, typer
 from rich.progress import Progress
 from ..io.system_loader import load_system, iter_spot_files_for_env, read_spot_yaml
-from ..profile.ecology import profile_spot_ecology  # your working ecology logic
+from ..profile.ecology import profile_spot  # your working ecology logic
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -37,7 +37,7 @@ def ecology_cmd(
         for env_file in env_files:
             for sid, spath in iter_spot_files_for_env(env_file, sys_info["paths"]):
                 spot = read_spot_yaml(spath).get("spot", {})
-                rows = profile_spot_ecology(spot, ecology_cfg)
+                rows = profile_spot(spot, ecology_cfg)
                 # add spot id to rows
                 for r in rows:
                     r["spot_id"] = sid
