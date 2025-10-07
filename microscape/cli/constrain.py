@@ -295,26 +295,33 @@ def constrain_cmd(
                     mnode = metab_spot["microbes"].setdefault(mid, {"reactions": {}})
 
                     for rr in reaction_rows:
-                        rid = rr["react_id"]
+                        rid = rr.get("react_id") or rr.get("reaction") or rr.get("id")
+                        if rid is None:
+                            # skip malformed row defensively
+                            continue
+
+                        # robustly get reaction type: prefer rr["rtype"], then rr["type"], else infer
+                        rr_type = rr.get("rtype") or rr.get("type") or ("exchange" if str(rid).startswith("EX_") else "internal")
+
                         # rich record for humans
                         dmic["reactions"][rid] = {
-                            "type": rr["rtype"],
-                            "lb0": rr["lb0"],
-                            "ub0": rr["ub0"],
-                            "lb_env": rr["lb_env"],
-                            "ub_env": rr["ub_env"],
-                            "lb_tx": rr["lb_tx"],
-                            "ub_tx": rr["ub_tx"],
-                            "lb_final": rr["lb_final"],
-                            "ub_final": rr["ub_final"],
-                            "changed": rr["changed"],
-                            "notes": rr["notes"],
+                            "type": rr_type,
+                            "lb0": rr.get("lb0"),
+                            "ub0": rr.get("ub0"),
+                            "lb_env": rr.get("lb_env"),
+                            "ub_env": rr.get("ub_env"),
+                            "lb_tx": rr.get("lb_tx"),
+                            "ub_tx": rr.get("ub_tx"),
+                            "lb_final": rr.get("lb_final"),
+                            "ub_final": rr.get("ub_final"),
+                            "changed": rr.get("changed", False),
+                            "notes": rr.get("notes", ""),
                         }
                         # compact record for metabolism (only changed reactions)
-                        if rr["changed"]:
+                        if rr.get("changed", False):
                             mnode["reactions"][rid] = {
-                                "lb": rr["lb_final"],
-                                "ub": rr["ub_final"],
+                                "lb": rr.get("lb_final"),
+                                "ub": rr.get("ub_final"),
                             }
 
                     dmic["summary"] = {
@@ -344,7 +351,6 @@ def constrain_cmd(
         typer.echo(f"Debug JSON  : {j_debug}")
 
         # Compact constraints JSON for metabolism
-        # NOTE: name aligns with `--constraints` help ("constraints__*__reactions.json")
         j_metab = outdir / f"{stem}__reactions.json"
         j_metab.write_text(json.dumps(metab_nested, indent=2))
         typer.echo(f"Metab JSON  : {j_metab}")
