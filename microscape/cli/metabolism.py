@@ -1,7 +1,7 @@
 # microscape/cli/metabolism.py
 from __future__ import annotations
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple, Optional
 import json as jsonlib, csv, typer
 from rich.progress import Progress
 import numpy as np
@@ -48,7 +48,7 @@ def _apply_bounds_from_conc(model, rules: MetabolismRules, spot_mets: Dict[str, 
         ub = rules.uptake.secretion_upper
         try:
             rxn = model.reactions.get_by_id(ex_id)
-            # Ensure lower <= upper
+            # Ensure lower ≤ upper
             if lb > ub:
                 lb = ub
             rxn.lower_bound = lb
@@ -56,6 +56,83 @@ def _apply_bounds_from_conc(model, rules: MetabolismRules, spot_mets: Dict[str, 
             applied.append((ex_id, lb, ub))
         except Exception:
             # skip silently; caller can still solve
+            pass
+    return applied
+
+# ---------- NEW: constraints support ----------
+def _build_constraints_index(detail: dict) -> dict:
+    """Normalize a constraints JSON (compact or debug) into:
+       idx[spot_id][microbe_id] = {rxn_id: (lb, ub), ...}
+    """
+    idx: Dict[str, Dict[str, Dict[str, Tuple[Optional[float], Optional[float]]]]] = {}
+    if not isinstance(detail, dict):
+        return idx
+    spots_node = detail.get("spots") or {}
+    # Try compact shape: spots -> spot_id -> microbes -> mid -> reactions -> rid: {lb,ub}
+    compact_candidates = [k for k,v in spots_node.items() if isinstance(v, dict) and "microbes" in v]
+    if compact_candidates:
+        for sid, s_node in spots_node.items():
+            microbes = (s_node or {}).get("microbes") or {}
+            for mid, m_node in microbes.items():
+                rxns = (m_node or {}).get("reactions") or {}
+                for rid, b in rxns.items():
+                    lb = None; ub = None
+                    if isinstance(b, dict):
+                        lb = b.get("lb", b.get("lb_final"))
+                        ub = b.get("ub", b.get("ub_final"))
+                    if sid not in idx:
+                        idx[sid] = {}
+                    if mid not in idx[sid]:
+                        idx[sid][mid] = {}
+                    if lb is not None or ub is not None:
+                        try:
+                            lbv = float(lb) if lb is not None else None
+                            ubv = float(ub) if ub is not None else None
+                        except Exception:
+                            lbv, ubv = lb, ub
+                        idx[sid][mid][rid] = (lbv, ubv)
+        return idx
+    # Else try debug shape: spots -> env_id -> spots -> spot_id -> microbes -> mid -> reactions -> rid: {... 'lb_final','ub_final'...}
+    for env_id, env_node in spots_node.items():
+        s_spots = (env_node or {}).get("spots") or {}
+        for sid, s_node in s_spots.items():
+            microbes = (s_node or {}).get("microbes") or {}
+            for mid, m_node in microbes.items():
+                rxns = (m_node or {}).get("reactions") or {}
+                for rid, b in rxns.items():
+                    if not isinstance(b, dict):
+                        continue
+                    lb = b.get("lb", b.get("lb_final"))
+                    ub = b.get("ub", b.get("ub_final"))
+                    if sid not in idx:
+                        idx[sid] = {}
+                    if mid not in idx[sid]:
+                        idx[sid][mid] = {}
+                    if lb is not None or ub is not None:
+                        try:
+                            lbv = float(lb) if lb is not None else None
+                            ubv = float(ub) if ub is not None else None
+                        except Exception:
+                            lbv, ubv = lb, ub
+                        idx[sid][mid][rid] = (lbv, ubv)
+    return idx
+
+def _apply_constraints_to_model(model, bounds_map: Dict[str, Tuple[Optional[float], Optional[float]]]) -> List[tuple]:
+    """Apply final bounds to the model. Returns [(rid, lb, ub), ...] actually set."""
+    applied: List[tuple] = []
+    if not bounds_map:
+        return applied
+    for rid, (lb, ub) in bounds_map.items():
+        if rid not in model.reactions:
+            continue
+        try:
+            rxn = model.reactions.get_by_id(rid)
+            if lb is not None:
+                rxn.lower_bound = float(lb)
+            if ub is not None:
+                rxn.upper_bound = float(ub)
+            applied.append((rid, rxn.lower_bound, rxn.upper_bound))
+        except Exception:
             pass
     return applied
 
@@ -70,6 +147,7 @@ def metabolism_cmd(
     Profile steady-state metabolism per spot×microbe:
       - resolve models from system.registry.microbes
       - set exchange bounds from spot metabolite concentrations (mM) via metabolism.yml rules
+      - (NEW) apply final bounds from constraints__*__reactions.json if provided
       - set solver & fallback objective (if model lacks one)
       - run FBA and report objective + selected fluxes
     """
@@ -84,16 +162,23 @@ def metabolism_cmd(
         raise typer.Exit(1)
     rules: MetabolismRules = load_rules(metab_cfg_path)
 
-    detail = None
-    if constraints and constraints.exists():
-        import json
-        detail = json.loads(constraints.read_text())
+    constraints_idx: Dict[str, Dict[str, Dict[str, Tuple[Optional[float], Optional[float]]]]] = {}
+    if constraints:
+        try:
+            detail = jsonlib.loads(Path(constraints).read_text())
+            constraints_idx = _build_constraints_index(detail)
+            if verbose:
+                n_spots = len(constraints_idx)
+                n_pairs = sum(len(v) for v in constraints_idx.values())
+                typer.echo(f"Loaded constraints for {n_pairs} microbe pairs across {n_spots} spots")
+        except Exception as e:
+            typer.secho(f"Failed to read constraints file: {e}", fg=typer.colors.YELLOW)
 
     # 2) microbe -> SBML mapping
     microbe_models, warn_models = build_microbe_model_map(
         sys_info["root"],
         sys_info["system"],      # pass the whole system object
-        sys_info["paths"],       # so it can honor paths.microbes_dir
+        sys_info["paths"]        # so it can honor paths.microbes_dir
     )
     for w in warn_models:
         typer.secho("WARN: " + w, fg=typer.colors.YELLOW)
@@ -154,17 +239,29 @@ def metabolism_cmd(
                     # Per-spot exchange bounds from concentrations
                     applied = _apply_bounds_from_conc(model, rules, spot_mets)
 
+                    # (NEW) Constraints-based final bounds (override whatever's set so far)
+                    applied_constraints = []
+                    if spot_id in constraints_idx and mid in constraints_idx[spot_id]:
+                        applied_constraints = _apply_constraints_to_model(model, constraints_idx[spot_id][mid])
+
                     # Solve
                     try:
-                        sol = model.optimize()
-                        status = str(sol.status)
-                        obj = float(sol.objective_value) if sol.objective_value is not None else np.nan
-                        # record a few exchange fluxes present in the map
-                        fx = {}
-                        for ex_id in rules.metabolite_map.values():
-                            if ex_id in model.reactions and ex_id in sol.fluxes.index:
-                                fx[ex_id] = float(sol.fluxes[ex_id])
-                        per_microbe[mid] = {"status": status, "objective": obj, "fluxes": fx, "applied": applied}
+                        with model as mctx:
+                            sol = mctx.optimize()
+                            status = str(sol.status)
+                            obj = float(sol.objective_value) if sol.objective_value is not None else np.nan
+                            # record a few exchange fluxes present in the map
+                            fx = {}
+                            for ex_id in rules.metabolite_map.values():
+                                if ex_id in mctx.reactions and ex_id in sol.fluxes.index:
+                                    fx[ex_id] = float(sol.fluxes[ex_id])
+                            per_microbe[mid] = {
+                                "status": status,
+                                "objective": obj,
+                                "fluxes": fx,
+                                "applied_env": applied,
+                                "applied_constraints": applied_constraints,
+                            }
                     except Exception as e:
                         per_microbe[mid] = {"status": "solve_error", "detail": str(e)}
 
