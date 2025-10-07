@@ -1,82 +1,79 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<sbml xmlns="http://www.sbml.org/sbml/level3/version1/core"
-      xmlns:fbc="http://www.sbml.org/sbml/level3/version1/fbc/version2"
-      level="3" version="1" fbc:required="true">
-  <model id="M0015_model" name="M0015 GSMM">
-    <listOfCompartments>
-      <compartment id="c" spatialDimensions="3" size="1" constant="true"/>
-      <compartment id="e" spatialDimensions="3" size="1" constant="true"/>
-    </listOfCompartments>
+<ns0:sbml xmlns:ns0="http://www.sbml.org/sbml/level3/version1/core" xmlns:ns1="http://www.sbml.org/sbml/level3/version1/fbc/version2" level="3" version="1" ns1:required="true">
+  <ns0:model id="M0015_model" name="M0015 GSMM">
+    <ns0:listOfCompartments>
+      <ns0:compartment id="c" spatialDimensions="3" size="1" constant="true" />
+      <ns0:compartment id="e" spatialDimensions="3" size="1" constant="true" />
+    </ns0:listOfCompartments>
 
-    <listOfParameters>
-      <parameter id="lb_uptake_C0001" value="-8" constant="true"/>
-      <parameter id="lb_uptake_C0005" value="-6" constant="true"/>
-      <parameter id="lb_secrete" value="0" constant="true"/>
-      <parameter id="ub_ex" value="1000" constant="true"/>
-      <parameter id="lb_rev" value="-1000" constant="true"/>
-      <parameter id="ub_rev" value="1000" constant="true"/>
-      <parameter id="lb_irrev" value="0" constant="true"/>
-      <parameter id="ub_irrev" value="1000" constant="true"/>
-      <parameter id="ub_biomass" value="1000" constant="true"/>
-    </listOfParameters>
+    <ns0:listOfParameters>
+      <ns0:parameter id="lb_uptake_C0001" value="-5.0" constant="true" />
+      <ns0:parameter id="lb_uptake_C0005" value="-6" constant="true" />
+      <ns0:parameter id="lb_secrete" value="0" constant="true" />
+      <ns0:parameter id="ub_ex" value="1000" constant="true" />
+      <ns0:parameter id="lb_rev" value="-1000" constant="true" />
+      <ns0:parameter id="ub_rev" value="1000" constant="true" />
+      <ns0:parameter id="lb_irrev" value="0" constant="true" />
+      <ns0:parameter id="ub_irrev" value="1000" constant="true" />
+      <ns0:parameter id="ub_biomass" value="100.0" constant="true" />
+    </ns0:listOfParameters>
 
-    <listOfSpecies>
-      <species id="C0001_c" name="C0001 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0002_c" name="C0002 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0003_c" name="C0003 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0004_c" name="C0004 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0005_c" name="C0005 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0006_c" name="C0006 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0007_c" name="C0007 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0008_c" name="C0008 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0009_c" name="C0009 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0010_c" name="C0010 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0001_e" name="C0001 [e]" compartment="e" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0004_e" name="C0004 [e]" compartment="e" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0005_e" name="C0005 [e]" compartment="e" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-      <species id="C0008_e" name="C0008 [e]" compartment="e" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
-    </listOfSpecies>
+    <ns0:listOfSpecies>
+      <ns0:species id="C0001_c" name="C0001 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0002_c" name="C0002 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0003_c" name="C0003 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0004_c" name="C0004 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0005_c" name="C0005 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0006_c" name="C0006 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0007_c" name="C0007 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0008_c" name="C0008 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0009_c" name="C0009 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0010_c" name="C0010 [c]" compartment="c" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0001_e" name="C0001 [e]" compartment="e" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0004_e" name="C0004 [e]" compartment="e" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0005_e" name="C0005 [e]" compartment="e" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+      <ns0:species id="C0008_e" name="C0008 [e]" compartment="e" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false" />
+    </ns0:listOfSpecies>
 
-    <listOfReactions>
-      <reaction id="EX_C0001_e" reversible="false" fbc:lowerFluxBound="lb_uptake_C0001" fbc:upperFluxBound="ub_ex"><listOfReactants><speciesReference species="C0001_e" stoichiometry="1"/></listOfReactants></reaction>
-      <reaction id="EX_C0005_e" reversible="false" fbc:lowerFluxBound="lb_uptake_C0005" fbc:upperFluxBound="ub_ex"><listOfReactants><speciesReference species="C0005_e" stoichiometry="1"/></listOfReactants></reaction>
-      <reaction id="EX_C0004_e" reversible="false" fbc:lowerFluxBound="lb_secrete" fbc:upperFluxBound="ub_ex"><listOfReactants><speciesReference species="C0004_e" stoichiometry="1"/></listOfReactants></reaction>
-      <reaction id="EX_C0008_e" reversible="false" fbc:lowerFluxBound="lb_secrete" fbc:upperFluxBound="ub_ex"><listOfReactants><speciesReference species="C0008_e" stoichiometry="1"/></listOfReactants></reaction>
-      <reaction id="T_C0001" reversible="true" fbc:lowerFluxBound="lb_rev" fbc:upperFluxBound="ub_rev"><listOfReactants><speciesReference species="C0001_e" stoichiometry="1"/></listOfReactants><listOfProducts><speciesReference species="C0001_c" stoichiometry="1"/></listOfProducts><fbc:geneProductAssociation><fbc:geneProductRef fbc:geneProduct="G0007"/></fbc:geneProductAssociation></reaction>
-      <reaction id="T_C0005" reversible="true" fbc:lowerFluxBound="lb_rev" fbc:upperFluxBound="ub_rev"><listOfReactants><speciesReference species="C0005_e" stoichiometry="1"/></listOfReactants><listOfProducts><speciesReference species="C0005_c" stoichiometry="1"/></listOfProducts><fbc:geneProductAssociation><fbc:geneProductRef fbc:geneProduct="G0009"/></fbc:geneProductAssociation></reaction>
-      <reaction id="T_C0004" reversible="true" fbc:lowerFluxBound="lb_rev" fbc:upperFluxBound="ub_rev"><listOfReactants><speciesReference species="C0004_e" stoichiometry="1"/></listOfReactants><listOfProducts><speciesReference species="C0004_c" stoichiometry="1"/></listOfProducts></reaction>
-      <reaction id="T_C0008" reversible="true" fbc:lowerFluxBound="lb_rev" fbc:upperFluxBound="ub_rev"><listOfReactants><speciesReference species="C0008_e" stoichiometry="1"/></listOfReactants><listOfProducts><speciesReference species="C0008_c" stoichiometry="1"/></listOfProducts></reaction>
-      <reaction id="R1_C0001_to_C0002_C0003" reversible="false" fbc:lowerFluxBound="lb_irrev" fbc:upperFluxBound="ub_irrev"><listOfReactants><speciesReference species="C0001_c" stoichiometry="1"/></listOfReactants><listOfProducts><speciesReference species="C0002_c" stoichiometry="1"/><speciesReference species="C0003_c" stoichiometry="1"/></listOfProducts><fbc:geneProductAssociation><fbc:and><fbc:geneProductRef fbc:geneProduct="G0001"/><fbc:geneProductRef fbc:geneProduct="G0002"/></fbc:and></fbc:geneProductAssociation></reaction>
-      <reaction id="R2_C0003_to_C0004" reversible="false" fbc:lowerFluxBound="lb_irrev" fbc:upperFluxBound="ub_irrev"><listOfReactants><speciesReference species="C0003_c" stoichiometry="2"/></listOfReactants><listOfProducts><speciesReference species="C0004_c" stoichiometry="1"/></listOfProducts><fbc:geneProductAssociation><fbc:geneProductRef fbc:geneProduct="G0003"/></fbc:geneProductAssociation></reaction>
-      <reaction id="R3_C0002_C0005_to_C0006" reversible="false" fbc:lowerFluxBound="lb_irrev" fbc:upperFluxBound="ub_irrev"><listOfReactants><speciesReference species="C0002_c" stoichiometry="1"/><speciesReference species="C0005_c" stoichiometry="1"/></listOfReactants><listOfProducts><speciesReference species="C0006_c" stoichiometry="1"/></listOfProducts><fbc:geneProductAssociation><fbc:geneProductRef fbc:geneProduct="G0004"/></fbc:geneProductAssociation></reaction>
-      <reaction id="R4_C0006_to_C0007_C0008" reversible="false" fbc:lowerFluxBound="lb_irrev" fbc:upperFluxBound="ub_irrev"><listOfReactants><speciesReference species="C0006_c" stoichiometry="1"/></listOfReactants><listOfProducts><speciesReference species="C0007_c" stoichiometry="0.5"/><speciesReference species="C0008_c" stoichiometry="0.5"/></listOfProducts><fbc:geneProductAssociation><fbc:geneProductRef fbc:geneProduct="G0005"/></fbc:geneProductAssociation></reaction>
-      <reaction id="BIOMASS" reversible="false" fbc:lowerFluxBound="lb_irrev" fbc:upperFluxBound="ub_biomass">
-        <listOfReactants>
-          <speciesReference species="C0002_c" stoichiometry="0.1"/>
-          <speciesReference species="C0003_c" stoichiometry="0.2"/>
-          <speciesReference species="C0004_c" stoichiometry="0.2"/>
-          <speciesReference species="C0006_c" stoichiometry="0.1"/>
-        </listOfReactants>
-        <listOfProducts/>
-      </reaction>
-    </listOfReactions>
+    <ns0:listOfReactions>
+      <ns0:reaction id="EX_C0001_e" reversible="false" ns1:lowerFluxBound="lb_uptake_C0001" ns1:upperFluxBound="ub_ex"><ns0:listOfReactants><ns0:speciesReference species="C0001_e" stoichiometry="1" /></ns0:listOfReactants></ns0:reaction>
+      <ns0:reaction id="EX_C0005_e" reversible="false" ns1:lowerFluxBound="lb_uptake_C0005" ns1:upperFluxBound="ub_ex"><ns0:listOfReactants><ns0:speciesReference species="C0005_e" stoichiometry="1" /></ns0:listOfReactants></ns0:reaction>
+      <ns0:reaction id="EX_C0004_e" reversible="false" ns1:lowerFluxBound="lb_secrete" ns1:upperFluxBound="ub_ex"><ns0:listOfReactants><ns0:speciesReference species="C0004_e" stoichiometry="1" /></ns0:listOfReactants></ns0:reaction>
+      <ns0:reaction id="EX_C0008_e" reversible="false" ns1:lowerFluxBound="lb_secrete" ns1:upperFluxBound="ub_ex"><ns0:listOfReactants><ns0:speciesReference species="C0008_e" stoichiometry="1" /></ns0:listOfReactants></ns0:reaction>
+      <ns0:reaction id="T_C0001" reversible="true" ns1:lowerFluxBound="lb_rev" ns1:upperFluxBound="ub_rev"><ns0:listOfReactants><ns0:speciesReference species="C0001_e" stoichiometry="1" /></ns0:listOfReactants><ns0:listOfProducts><ns0:speciesReference species="C0001_c" stoichiometry="1" /></ns0:listOfProducts><ns1:geneProductAssociation><ns1:geneProductRef ns1:geneProduct="G0007" /></ns1:geneProductAssociation></ns0:reaction>
+      <ns0:reaction id="T_C0005" reversible="true" ns1:lowerFluxBound="lb_rev" ns1:upperFluxBound="ub_rev"><ns0:listOfReactants><ns0:speciesReference species="C0005_e" stoichiometry="1" /></ns0:listOfReactants><ns0:listOfProducts><ns0:speciesReference species="C0005_c" stoichiometry="1" /></ns0:listOfProducts><ns1:geneProductAssociation><ns1:geneProductRef ns1:geneProduct="G0009" /></ns1:geneProductAssociation></ns0:reaction>
+      <ns0:reaction id="T_C0004" reversible="true" ns1:lowerFluxBound="lb_rev" ns1:upperFluxBound="ub_rev"><ns0:listOfReactants><ns0:speciesReference species="C0004_e" stoichiometry="1" /></ns0:listOfReactants><ns0:listOfProducts><ns0:speciesReference species="C0004_c" stoichiometry="1" /></ns0:listOfProducts></ns0:reaction>
+      <ns0:reaction id="T_C0008" reversible="true" ns1:lowerFluxBound="lb_rev" ns1:upperFluxBound="ub_rev"><ns0:listOfReactants><ns0:speciesReference species="C0008_e" stoichiometry="1" /></ns0:listOfReactants><ns0:listOfProducts><ns0:speciesReference species="C0008_c" stoichiometry="1" /></ns0:listOfProducts></ns0:reaction>
+      <ns0:reaction id="R1_C0001_to_C0002_C0003" reversible="false" ns1:lowerFluxBound="lb_irrev" ns1:upperFluxBound="ub_irrev"><ns0:listOfReactants><ns0:speciesReference species="C0001_c" stoichiometry="1" /></ns0:listOfReactants><ns0:listOfProducts><ns0:speciesReference species="C0002_c" stoichiometry="1" /><ns0:speciesReference species="C0003_c" stoichiometry="1" /></ns0:listOfProducts><ns1:geneProductAssociation><ns1:and><ns1:geneProductRef ns1:geneProduct="G0001" /><ns1:geneProductRef ns1:geneProduct="G0002" /></ns1:and></ns1:geneProductAssociation></ns0:reaction>
+      <ns0:reaction id="R2_C0003_to_C0004" reversible="false" ns1:lowerFluxBound="lb_irrev" ns1:upperFluxBound="ub_irrev"><ns0:listOfReactants><ns0:speciesReference species="C0003_c" stoichiometry="2" /></ns0:listOfReactants><ns0:listOfProducts><ns0:speciesReference species="C0004_c" stoichiometry="1" /></ns0:listOfProducts><ns1:geneProductAssociation><ns1:geneProductRef ns1:geneProduct="G0003" /></ns1:geneProductAssociation></ns0:reaction>
+      <ns0:reaction id="R3_C0002_C0005_to_C0006" reversible="false" ns1:lowerFluxBound="lb_irrev" ns1:upperFluxBound="ub_irrev"><ns0:listOfReactants><ns0:speciesReference species="C0002_c" stoichiometry="1" /><ns0:speciesReference species="C0005_c" stoichiometry="1" /></ns0:listOfReactants><ns0:listOfProducts><ns0:speciesReference species="C0006_c" stoichiometry="1" /></ns0:listOfProducts><ns1:geneProductAssociation><ns1:geneProductRef ns1:geneProduct="G0004" /></ns1:geneProductAssociation></ns0:reaction>
+      <ns0:reaction id="R4_C0006_to_C0007_C0008" reversible="false" ns1:lowerFluxBound="lb_irrev" ns1:upperFluxBound="ub_irrev"><ns0:listOfReactants><ns0:speciesReference species="C0006_c" stoichiometry="1" /></ns0:listOfReactants><ns0:listOfProducts><ns0:speciesReference species="C0007_c" stoichiometry="0.5" /><ns0:speciesReference species="C0008_c" stoichiometry="0.5" /></ns0:listOfProducts><ns1:geneProductAssociation><ns1:geneProductRef ns1:geneProduct="G0005" /></ns1:geneProductAssociation></ns0:reaction>
+      <ns0:reaction id="BIOMASS" reversible="false" ns1:lowerFluxBound="lb_irrev" ns1:upperFluxBound="ub_biomass">
+        <ns0:listOfReactants>
+          <ns0:speciesReference species="C0002_c" stoichiometry="0.1" />
+          <ns0:speciesReference species="C0003_c" stoichiometry="0.2" />
+          <ns0:speciesReference species="C0004_c" stoichiometry="0.2" />
+          <ns0:speciesReference species="C0006_c" stoichiometry="0.1" />
+        </ns0:listOfReactants>
+        <ns0:listOfProducts />
+      </ns0:reaction>
+    </ns0:listOfReactions>
 
-    <fbc:listOfGeneProducts>
-      <fbc:geneProduct fbc:id="G0001" fbc:label="G0001"/>
-      <fbc:geneProduct fbc:id="G0002" fbc:label="G0002"/>
-      <fbc:geneProduct fbc:id="G0007" fbc:label="G0007"/>
-      <fbc:geneProduct fbc:id="G0003" fbc:label="G0003"/>
-      <fbc:geneProduct fbc:id="G0004" fbc:label="G0004"/>
-      <fbc:geneProduct fbc:id="G0005" fbc:label="G0005"/>
-      <fbc:geneProduct fbc:id="G0009" fbc:label="G0009"/>
-    </fbc:listOfGeneProducts>
+    <ns1:listOfGeneProducts>
+      <ns1:geneProduct ns1:id="G0001" ns1:label="G0001" />
+      <ns1:geneProduct ns1:id="G0002" ns1:label="G0002" />
+      <ns1:geneProduct ns1:id="G0007" ns1:label="G0007" />
+      <ns1:geneProduct ns1:id="G0003" ns1:label="G0003" />
+      <ns1:geneProduct ns1:id="G0004" ns1:label="G0004" />
+      <ns1:geneProduct ns1:id="G0005" ns1:label="G0005" />
+      <ns1:geneProduct ns1:id="G0009" ns1:label="G0009" />
+    </ns1:listOfGeneProducts>
 
-    <listOfObjectives fbc:activeObjective="obj">
-      <objective fbc:id="obj" fbc:type="maximize">
-        <listOfFluxObjectives>
-          <fluxObjective fbc:reaction="BIOMASS" fbc:coefficient="1"/>
-        </listOfFluxObjectives>
-      </objective>
-    </listOfObjectives>
-  </model>
-</sbml>
+    <ns0:listOfObjectives ns1:activeObjective="obj">
+      <ns0:objective ns1:id="obj" ns1:type="maximize">
+        <ns0:listOfFluxObjectives>
+          <ns0:fluxObjective ns1:reaction="BIOMASS" ns1:coefficient="1" />
+        </ns0:listOfFluxObjectives>
+      </ns0:objective>
+    </ns0:listOfObjectives>
+  </ns0:model>
+</ns0:sbml>

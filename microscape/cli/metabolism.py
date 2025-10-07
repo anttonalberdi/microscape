@@ -5,6 +5,8 @@ from typing import Dict, Any, List, Tuple, Optional, Set
 import json as jsonlib, csv, typer
 from rich.progress import Progress
 import numpy as np
+import logging
+from contextlib import contextmanager
 
 from ..io.system_loader import load_system, iter_spot_files_for_env
 from ..io.microbe_registry import build_microbe_model_map
@@ -12,6 +14,37 @@ from ..io.metabolism_rules import load_rules, MetabolismRules
 from ..io.spot_loader import load_spot
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
+
+# ---- targeted warning suppression (scoped) ----
+@contextmanager
+def _suppress_no_objective_warning():
+    """
+    Suppress only the COBRA warning:
+      'No objective coefficients in model. Unclear what should be optimized'
+    during a critical section (e.g., model.optimize()).
+    """
+    class _Filter(logging.Filter):
+        TARGET = "No objective coefficients in model. Unclear what should be optimized"
+        def filter(self, record: logging.LogRecord) -> bool:
+            try:
+                msg = record.getMessage()
+            except Exception:
+                msg = str(record.msg)
+            return (self.TARGET not in msg)
+
+    filt = _Filter()
+    # attach to both cobra and optlang just in case
+    loggers = [logging.getLogger("cobra"), logging.getLogger("optlang")]
+    for lg in loggers:
+        lg.addFilter(filt)
+    try:
+        yield
+    finally:
+        for lg in loggers:
+            try:
+                lg.removeFilter(filt)
+            except Exception:
+                pass
 
 def _set_solver(model, solver: str):
     try:
@@ -266,7 +299,7 @@ def metabolism_cmd(
                     # Solver
                     _set_solver(model, rules.solver)
 
-                    # Fallback objective
+                    # Fallback objective (only if rule specifies one and exists)
                     if (model.objective is None or len(model.objective.variables) == 0) and rules.objective:
                         try:
                             if rules.objective in model.reactions:
@@ -295,9 +328,9 @@ def metabolism_cmd(
                             )
                             raise typer.Exit(2)
 
-                    # Solve
+                    # Solve (with targeted suppression of the 'no objective coefficients' warning)
                     try:
-                        with model as mctx:
+                        with model as mctx, _suppress_no_objective_warning():
                             sol = mctx.optimize()
                             status = str(sol.status)
                             obj = float(sol.objective_value) if sol.objective_value is not None else np.nan
