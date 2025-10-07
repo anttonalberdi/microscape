@@ -9,23 +9,9 @@ def _read_yaml(p: Path) -> dict:
         return yaml.safe_load(fh) or {}
 
 def _resolve(base: Path, maybe: Optional[str]) -> Optional[Path]:
-    if not maybe:
-        return None
+    if not maybe: return None
     p = Path(maybe)
     return (base / p) if not p.is_absolute() else p
-
-def _resolve_under_dir(root: Path, dir_from_paths: Optional[str], entry_file: str | None, fallback_dirname: str) -> Path:
-    """
-    Resolve a registry 'file' (e.g., 'M0001.yml') under the directory declared
-    in system.paths (e.g. microbes_dir). Falls back to <root>/<fallback_dirname>.
-    """
-    base_dir = _resolve(root, dir_from_paths) or (root / fallback_dirname)
-    if not entry_file:
-        raise ValueError(f"Missing 'file' in registry entry for {fallback_dirname[:-1]}")
-    p = Path(entry_file)
-    return (base_dir / p) if not p.is_absolute() else p
-
-# ---------- public API ----------
 
 def load_system(system_yml: Path) -> dict:
     system_yml = Path(system_yml).resolve()
@@ -104,45 +90,15 @@ def iter_spot_files_for_env(env_file: Path, sys_paths: Dict) -> List[Tuple[str, 
     return out
 
 def read_spot_yaml(spot_path: Path) -> dict:
-    return _read_yaml(spot_path).get("spot") or {}
+    return _read_yaml(spot_path).get("spot", {})
 
-def read_environment_yaml(env_path: Path) -> dict:
-    return _read_yaml(env_path).get("environment") or {}
-
-def read_microbe_yaml(mid: str, sys_info: dict) -> dict | None:
-    """
-    Load a microbe YAML given its ID and the system info (to resolve paths).
-    Returns the parsed YAML with an extra key '__file__' pointing to its file path.
-    """
-    microbes_dir = Path(sys_info["paths"].get("microbes_dir") or "microbes")
-    root = Path(sys_info["root"])
-    m_path = None
-
-    # Resolve from registry
-    registry = ((sys_info.get("system") or {}).get("registry") or {}).get("microbes", [])
-    for entry in registry:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("id") == mid:
-            m_path = entry.get("file")
-            if m_path:
-                m_path = Path(m_path)
-                if not m_path.is_absolute():
-                    m_path = root / microbes_dir / m_path
-            break
-
-    # fallback if not found
-    if not m_path:
-        candidate = root / microbes_dir / f"{mid}.yml"
-        if candidate.exists():
-            m_path = candidate
-
-    if not m_path or not m_path.exists():
-        return None
-
-    data = _read_yaml(m_path)
-    data["__file__"] = str(m_path)
-    return data
+def read_microbe_yaml(mid: str, sys_info: dict) -> Optional[dict]:
+    p = sys_info.get("microbe_files", {}).get(mid)
+    if not p: return None
+    d = _read_yaml(p).get("microbe", {})
+    if not d: return None
+    d["_file"] = p
+    return d
 
 def spot_transcripts(spot: dict) -> Dict[str, Dict[str, float]]:
     """Return {microbe_id: {gene_id: TPM}} from a spot dict."""

@@ -1,47 +1,11 @@
+# microscape/io/constraint_rules.py
 from __future__ import annotations
 from dataclasses import dataclass, field
+from typing import Dict, Tuple, Optional, Iterable
 from pathlib import Path
-from typing import Dict, Optional, Any
 import yaml
-
-@dataclass
-class NormalizeSpec:
-    mode: str = "per_microbe_max"     # per_microbe_max | per_model_max | constant
-    constant: float = 1000.0          # used if mode == constant
-
-@dataclass
-class GPRActivitySpec:
-    logic: str = "and_min_or_max"     # only option we implement now
-    normalize: NormalizeSpec = field(default_factory=NormalizeSpec)
-    threshold_TPM: float = 1.0
-    floor_activity: float = 0.0
-    cap_activity: float = 1.0
-
-@dataclass
-class BoundScalingSpec:
-    min_irrev_ub: float = 0.0
-    min_rev_mag: float = 0.0
-
-@dataclass
-class UptakeSpec:
-    enabled: bool = True
-    mM_per_uptake: float = 1.0
-    max_uptake: float = 10.0
-    secretion_upper: float = 1000.0
-    metabolite_map: Dict[str, str] = field(default_factory=dict)
-
-@dataclass
-class WriteModelsSpec:
-    enabled: bool = True
-    dir: str = "constrained_models"
-
-@dataclass
-class ConstraintRules:
-    solver: str = "glpk"
-    gpr_activity: GPRActivitySpec = field(default_factory=GPRActivitySpec)
-    bound_scaling: BoundScalingSpec = field(default_factory=BoundScalingSpec)
-    uptake: UptakeSpec = field(default_factory=UptakeSpec)
-    write_models: WriteModelsSpec = field(default_factory=WriteModelsSpec)
+import math
+from cobra.core import Model, Reaction
 
 @dataclass
 class UptakeRule:
@@ -57,6 +21,14 @@ class TxRule:
     eflux_norm: str = "max"    # 'max' or 'percentile'
     percentile: float = 95.0
     min_scale: float = 0.0     # floor scaling
+
+@dataclass
+class ConstraintRules:
+    solver: str = "glpk"
+    objective: Optional[str] = None
+    metabolite_map: Dict[str, str] = field(default_factory=dict)
+    uptake: UptakeRule = field(default_factory=UptakeRule)
+    transcription: TxRule = field(default_factory=TxRule)
 
 def load_constraint_rules(p: Path) -> ConstraintRules:
     d = yaml.safe_load(p.read_text()) or {}
