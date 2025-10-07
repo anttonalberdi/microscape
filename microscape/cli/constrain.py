@@ -7,7 +7,7 @@ from rich.progress import Progress
 from typing import Dict, List, Tuple
 
 from ..io.system_loader import load_system, iter_spot_files_for_env, read_spot_yaml, read_microbe_yaml
-from ..io.metabolism_rules import load_rules  # reuse for env mapping if you like
+from ..io.metabolism_rules import load_rules, MetabolismRules, expr_to_exchange_bounds
 from ..runner.constraints import constrain_one
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
