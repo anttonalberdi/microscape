@@ -13,52 +13,29 @@ MicroScape helps you **map**, **simulate**, and **analyse** micro‑scale spatia
 
 - **Map** different spatial omic datasets, including spatial metagenomics, metatranscriptomics and metabolomics.
 - **Simulate** microbial landscapes under realistic constraints.
-- **Analyse** microbiome functioning, microbe-microbe and host-microbiota interactions
+- **Analyse** microbiome functioning, microbe–microbe and host–microbiota interactions.
 
 ---
 
 ## 🚀 Quick start
 
 ### Requirements
-- **Python** ≥ 3.10 (via Conda recommended).
-- Unix‑like OS (Linux or macOS).
+- **Python** ≥ 3.10 (Conda recommended).
+- Unix‑like OS (**Linux** or **macOS**).
 - ~2–4 GB RAM for the synthetic demo.
 
-### Install (Conda)
+### Install (Conda, recommended)
 ```bash
 conda env create -f https://raw.githubusercontent.com/anttonalberdi/microscape/refs/heads/main/envs/microscape.yaml
 conda activate microscape
 microscape --help
 ```
 
-### Run the synthetic demo
+### Alternative install (pip)
 ```bash
-# 1) Validate an example Spatial Design Parameter (SDP) folder
-microscape validate -i demo/system.yml
-
-# 2) Simulate a spatially explicit microbial landscape
-microscape profile -i demo/system.yml -o results/
-
-# 2) Simulate a spatially explicit microbial landscape
-microscape calibrate -i demo/system.yml -o results/
-
----
-
-## 🧰 CLI overview
-All functionality is exposed via the `microscape` command:
-
-```
+pip install git+https://github.com/anttonalberdi/microscape.git
 microscape --help
 ```
-
-Common subcommands (run with `-h` to see full flags):
-
-- `validate-sdp <PATH>` – checks your spatial design specification (folder or YAML) for completeness and consistency.
-- `simulate <CONFIG.yml> --out <FILE.npz>` – runs a stochastic simulation using the provided configuration; accepts options like `--seed`, `--n-replicates`, and `--progress`.
-- `export <FILE.npz> --format csv` – converts simulation artifacts to analysis‑ready tables.
-- `plot <FILE.npz> --what abundance` – produces quick‑look figures for sanity checks.
-
-> Tip: Keep configs under version control (`examples/` shows suggested structure). Use `--seed` for reproducibility.
 
 ---
 
@@ -74,49 +51,80 @@ microscape/
 └─ README.md        # This file
 ```
 
----
+## 🗂️ Example folder layout (after a full run)
 
-## 📘 Configuration guide (SDP & simulation)
-
-### 1) Spatial Design Parameters (SDP)
-An SDP captures your planned sampling layout and constraints. A minimal SDP includes:
-- **grid / coordinates**: spatial grid or point set
-- **sample plan**: number of samples per region/stratum
-- **biological priors**: optional community/gradient priors
-
-Validate with:
-```bash
-microscape validate-sdp path/to/sdp
 ```
-
-### 2) Simulation config (`sim_config.yml`)
-Key fields you’ll likely set:
-- `random_seed`: integer for reproducibility
-- `n_replicates`: number of independent simulations
-- `landscape`: model name and parameters
-- `measurement`: noise model and depth
-- `export`: which tables to write out
-
-Run with:
-```bash
-microscape simulate sim_config.yml --out outputs/run.npz
+test/
+├─ ecology_summary.csv
+├─ constraints__environmental.csv
+├─ constraints__environmental__reactions.json
+├─ constraints__environmental__debug.json
+├─ constraints__transcriptional.csv
+├─ constraints__transcriptional__reactions.json
+├─ constraints__transcriptional__debug.json
+├─ constraints__combined.csv
+├─ constraints__combined__reactions.json
+├─ constraints__combined__debug.json
+├─ metabolism_unconstrained.csv
+├─ metabolism_unconstrained.json
+├─ metabolism_constrained_combined.csv
+├─ metabolism_constrained_combined.json
+├─ community_metrics_spot.csv
+├─ community_pairwise.csv
+└─ community_microbe.csv
 ```
 
 ---
 
-## 📈 Example: quick visualization
+### 🔁 Copy‑paste demo (synthetic example)
 
 ```bash
-microscape plot outputs/run_001.npz --what abundance --save fig_abundance.png
+# Validate the configuration
+microscape validate demo/system.yml
+
+# Optional: ecological summaries
+microscape ecology demo/system.yml --outdir test
+
+# Build constraints (choose one or run all)
+microscape constrain demo/system.yml --outdir test --mode environmental
+microscape constrain demo/system.yml --outdir test --mode transcriptional
+microscape constrain demo/system.yml --outdir test --mode combined
+
+# Run metabolism WITHOUT constraints (baseline)
+microscape metabolism demo/system.yml --outdir test
+
+# Run metabolism WITH constraints (example: combined mode)
+microscape metabolism demo/system.yml \
+  --outdir test \
+  --constraints test/constraints__combined__reactions.json
+
+# Community‑level metrics from a named metabolism JSON
+microscape community test/metabolism_unconstrained.json --outdir test
 ```
+
 ---
 
-## 🧾 License
-Distributed under the terms described in [LICENSE](./LICENSE).
+## 📦 Command reference & expected outputs
 
-## 🆘 Support & contact
-- Issues & bugs: please open a GitHub issue
-- Questions & ideas: open a discussion or reach out to the maintainers
+> Paths are relative to your `--outdir`. Filenames are deterministic so they’re easy to script against.
+
+| Command | Purpose | Key outputs | Notes |
+|---|---|---|---|
+| `microscape update` | Refresh internal registries/caches | — | Prints progress; no user‑facing files. |
+| `microscape validate <system.yml>` | Sanity‑check structure & paths | — | Prints `OK` on success; otherwise a clear error. |
+| `microscape ecology <system.yml> --outdir DIR` | Per‑spot ecological summary | `ecology_summary.csv` | Optional QC/inspection step. |
+| `microscape constrain <system.yml> --outdir DIR --mode {environmental\|transcriptional\|combined}` | Convert measurements → **reaction bounds** | `constraints__{mode}.csv` • `constraints__{mode}__reactions.json` • `constraints__{mode}__debug.json` | Use `__reactions.json` later with `metabolism --constraints`. `__debug.json` is a full per‑reaction audit trail. |
+| `microscape metabolism <system.yml> --outdir DIR` | FBA per **spot × microbe** (baseline) | `metabolism_unconstrained.{csv,json}` | Records objective & selected exchange fluxes. |
+| `microscape metabolism <system.yml> --outdir DIR --constraints constraints__{mode}__reactions.json` | FBA with **final bounds** applied | `metabolism_constrained_{mode}.{csv,json}` | `mode` auto‑detected from JSON (`environmental`, `transcriptional`, `combined`, or `custom`). Strict by default (see below). |
+| `microscape community <named_metabolism.json> --outdir DIR` | **Community metrics** per spot | `community_metrics_spot.csv` • `community_pairwise.csv` • `community_microbe.csv` • *(optional)* `community_graph.json` | Uses exchange fluxes: uptake = `max(0, −flux)`, secretion = `max(0, +flux)`. Add `--graph` to emit a bipartite + cross‑feeding graph. |
+
+---
+
+## 🔍 Outputs—at a glance
+
+### Constraints (`constraints__{mode}*`)
+- **CSV**: one row per `spot_id × microbe` with `changed_ex`, `changed_internal`, `warnings`.
+- **`__reactions.json` (compact)**: only **changed** reactions with **final** bounds, consumable by `metabolism --constraints`.
 
 ---
 
