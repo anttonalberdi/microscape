@@ -239,12 +239,12 @@ def constrain_cmd(
     ),
     outdir: Path = typer.Option("outputs/constraints", help="Output directory"),
     write_json: bool = typer.Option(True, "--json/--no-json", help="Write JSON outputs"),
-    write_csv: bool = typer.Option(True, "--csv/--no-csv", help="Write summary TSV"),
+    write_csv: bool = typer.Option(True, "--csv/--no-csv", help="Write summary CSV"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Extra logs"),
 ):
     """
     Build constraints for each spot×microbe and write:
-      - summary TSV (one row per spot×microbe)
+      - summary CSV (one row per spot×microbe)
       - detailed JSON (debug)
       - compact constraints JSON (for `microscape metabolism --constraints`)
     """
@@ -383,13 +383,13 @@ def constrain_cmd(
     stem = f"constraints__{mode_l}"
 
     if write_csv:
-        tsv = outdir / f"{stem}.tsv"
-        with tsv.open("w", newline="") as fh:
-            w = csv.writer(fh, delimiter="\t")
+        csv_path = outdir / f"{stem}.csv"
+        with csv_path.open("w", newline="") as fh:
+            w = csv.writer(fh)  # default delimiter = ','
             w.writerow(["spot_id","microbe","mode","changed_ex","changed_internal","warnings"])
             for r in summary_rows:
                 w.writerow([r["spot_id"], r["microbe"], r["mode"], r["changed_ex"], r["changed_internal"], r["warnings"]])
-        typer.echo(f"Summary TSV : {tsv}")
+        typer.echo(f"Summary CSV : {csv_path}")
 
     if write_json:
         # Detailed debug JSON (keeps rich info you already had)
