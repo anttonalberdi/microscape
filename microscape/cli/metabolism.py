@@ -5,6 +5,8 @@ from typing import Dict, Any, List, Tuple, Optional, Set
 import json as jsonlib, csv, typer
 from rich.progress import Progress
 import numpy as np
+import warnings, logging
+from contextlib import contextmanager
 
 from ..io.system_loader import load_system, iter_spot_files_for_env
 from ..io.microbe_registry import build_microbe_model_map
@@ -12,6 +14,20 @@ from ..io.metabolism_rules import load_rules, MetabolismRules
 from ..io.spot_loader import load_spot
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
+
+@contextmanager
+def _suppress_no_objective_on_read():
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r"No objective coefficients.*should be optimized")
+        prev_cobra = logging.getLogger("cobra").level
+        prev_optlang = logging.getLogger("optlang").level
+        logging.getLogger("cobra").setLevel(logging.ERROR)
+        logging.getLogger("optlang").setLevel(logging.ERROR)
+        try:
+            yield
+        finally:
+            logging.getLogger("cobra").setLevel(prev_cobra)
+            logging.getLogger("optlang").setLevel(prev_optlang)
 
 def _set_solver(model, solver: str):
     try:
@@ -258,7 +274,8 @@ def metabolism_cmd(
                         continue
                     # Load SBML
                     try:
-                        model = cobra.io.read_sbml_model(str(sbml_path))
+                        with _suppress_no_objective_on_read():
+                            model = cobra.io.read_sbml_model(str(sbml_path))
                     except Exception as e:
                         per_microbe[mid] = {"status": "sbml_load_error", "detail": str(e)}
                         continue
