@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from rich.progress import Progress
 from typing import Dict, List, Tuple
+from math import isfinite
 
 from ..io.system_loader import load_system, iter_spot_files_for_env, read_spot_yaml, read_microbe_yaml
 from ..io.metabolism_rules import load_rules, MetabolismRules, expr_to_exchange_bounds
@@ -111,11 +112,12 @@ def constrain_cmd(
                             env_bounds[ex_id] = (lb_env, ub_env)
 
                     # Build transcriptional bounds (toy example: close reactions with low marker expression)
-                    tx_bounds: Dict[str, Tuple[float,float]] = {}
-                    if mode_l in ("transcriptional","combined"):
-                        # Here you would parse spot transcripts and your ecology/metab TX rules
-                        # For now, we leave empty or close known marker reactions as in your earlier logic
-                        pass
+                    tx_bounds: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+                    if mode_l in ("transcriptional", "combined"):
+                        tx_for_microbe = (
+                            ((spot.get("measurements") or {}).get("transcripts") or {}).get("values") or {}
+                        ).get(mid) or {}
+                        tx_bounds = build_tx_bounds(model, base_bounds, tx_for_microbe)
 
                     # Merge to per-reaction decisions
                     summary_row, reaction_rows = constrain_one(
