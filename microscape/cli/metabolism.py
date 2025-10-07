@@ -143,9 +143,9 @@ def metabolism_cmd(
 ):
     """
     Profile steady-state metabolism per spot×microbe with optional constraints.
-    Writes:
-      - legacy: metabolism_summary.csv & metabolism_summary.json (unchanged, no extra echo)
-      - named:  metabolism_unconstrained.csv/json OR metabolism_constrained_<mode>.csv/json
+    Writes ONLY named outputs:
+      metabolism_unconstrained.csv/json
+      metabolism_constrained_<environmental|transcriptional|combined|custom>.csv/json
     """
     outdir = outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
@@ -315,7 +315,7 @@ def metabolism_cmd(
                     except Exception as e:
                         per_microbe[mid] = {"status": "solve_error", "detail": str(e)}
 
-                    # Flat row for CSVs
+                    # Flat row for named CSVs
                     last = per_microbe[mid]
                     row = {
                         "spot_id": spot_id,
@@ -330,8 +330,7 @@ def metabolism_cmd(
                 per_spot_json[spot_id] = {"spot_id": spot_id, "microbes": per_microbe}
                 prog.advance(task)
 
-    # 5) write outputs
-    # named outputs (CSV + JSON), based on constraints type
+    # 5) write ONLY named outputs (CSV + JSON)
     if applied_any_constraints:
         label = (constraints_mode_label or "custom")
         base = f"metabolism_constrained_{label}"
@@ -341,10 +340,17 @@ def metabolism_cmd(
     named_csv = outdir / f"{base}.csv"
     named_json = outdir / f"{base}.json"
 
-    # write named JSON (same structure as legacy JSON)
+    # dynamic columns matching content
+    cols = ["spot_id", "microbe", "status", "objective"]
+    for r in all_rows:
+        for k in r:
+            if k not in cols:
+                cols.append(k)
+
+    # write named JSON
     named_json.write_text(jsonlib.dumps(per_spot_json, indent=2))
 
-    # write named CSV (same columns as legacy CSV)
+    # write named CSV
     with named_csv.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
@@ -354,5 +360,5 @@ def metabolism_cmd(
     # concise report
     typer.echo(f"\n🧪 Metabolism profiling complete.")
     typer.echo(f"  Rows written : {len(all_rows)}")
-    typer.echo(f"  Named CSV    : {named_csv}")
-    typer.echo(f"  Named JSON   : {named_json}")
+    typer.echo(f"  CSV          : {named_csv}")
+    typer.echo(f"  JSON         : {named_json}")
