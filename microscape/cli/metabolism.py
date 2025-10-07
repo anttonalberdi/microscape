@@ -5,8 +5,6 @@ from typing import Dict, Any, List, Tuple, Optional, Set
 import json as jsonlib, csv, typer
 from rich.progress import Progress
 import numpy as np
-import logging, warnings
-from contextlib import contextmanager
 
 from ..io.system_loader import load_system, iter_spot_files_for_env
 from ..io.microbe_registry import build_microbe_model_map
@@ -44,53 +42,6 @@ def _apply_bounds_from_conc(model, rules: MetabolismRules, spot_mets: Dict[str, 
         except Exception:
             pass
     return applied
-
-@contextmanager
-def _suppress_solver_objective_warning():
-    """
-    Suppress the noisy 'No objective coefficients in model. Unclear what should be optimized'
-    message regardless of whether it comes from logging or warnings, and only
-    during the enclosed block.
-    """
-    # 1) warnings-based suppression (regex keeps it targeted)
-    catch = warnings.catch_warnings()
-    catch.__enter__()
-    warnings.filterwarnings(
-        "ignore",
-        message=r"No objective coefficients.*should be optimized",
-        category=UserWarning,
-    )
-    # Some optlang builds raise custom warning classes; ignore broadly but scoped
-    try:
-        from optlang.exceptions import SolverWarning as _OptlangWarn  # type: ignore
-        warnings.filterwarnings("ignore", category=_OptlangWarn)
-    except Exception:
-        pass
-
-    # 2) logging-based suppression (raise level to ERROR briefly)
-    logger_names = (
-        "cobra",
-        "cobra.core.model",
-        "cobra.util.solver",
-        "optlang",
-        "optlang.interface",
-    )
-    prior_levels = []
-    try:
-        for name in logger_names:
-            lg = logging.getLogger(name)
-            prior_levels.append((lg, lg.level))
-            lg.setLevel(logging.ERROR)
-        yield
-    finally:
-        # restore logging levels
-        for lg, lvl in prior_levels:
-            try:
-                lg.setLevel(lvl)
-            except Exception:
-                pass
-        # restore warnings state
-        catch.__exit__(None, None, None)
 
 # ---------- constraints support ----------
 def _build_constraints_index(detail: dict) -> dict:
@@ -347,8 +298,7 @@ def metabolism_cmd(
                     # Solve
                     try:
                         with model as mctx:
-                            with _suppress_solver_objective_warning():
-                                sol = mctx.optimize()
+                            sol = mctx.optimize()
                             status = str(sol.status)
                             obj = float(sol.objective_value) if sol.objective_value is not None else np.nan
                             fx = {}
