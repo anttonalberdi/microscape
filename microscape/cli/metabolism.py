@@ -18,7 +18,7 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 @contextmanager
 def _suppress_no_objective_on_read():
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message=r"No objective coefficients.*should be optimized")
+        warnings.filterwarnings("ignore", message=r"No objective coefficients in model. Unclear what should be optimized")
         prev_cobra = logging.getLogger("cobra").level
         prev_optlang = logging.getLogger("optlang").level
         logging.getLogger("cobra").setLevel(logging.ERROR)
@@ -275,7 +275,6 @@ def metabolism_cmd(
                     # Load SBML
                     try:
                         with _suppress_no_objective_on_read():
-                            print("test")
                             model = cobra.io.read_sbml_model(str(sbml_path))
                     except Exception as e:
                         per_microbe[mid] = {"status": "sbml_load_error", "detail": str(e)}
