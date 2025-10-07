@@ -42,7 +42,7 @@ spot:
     transcripts:
       unit: TPM
       schema: genes
-      per_microbe:
+      values:
         M0001:
           G0001: 37
           G0002: 52
