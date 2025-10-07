@@ -1,10 +1,10 @@
 # microscape/io/system_loader.py
 from __future__ import annotations
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
+from typing import List, Dict, Tuple, Optional
 import yaml
 
-# ---------- helpers ----------
+# ---------- utils ----------
 
 def _read_yaml(p: Path) -> dict:
     with p.open("r", encoding="utf-8") as fh:
@@ -14,75 +14,82 @@ def _resolve(base: Path, maybe: Optional[str]) -> Optional[Path]:
     if not maybe:
         return None
     p = Path(maybe)
-    return p if p.is_absolute() else (base / p)
+    return (base / p) if not p.is_absolute() else p
+
+def _resolve_under_dir(root: Path, dir_from_paths: Optional[str], entry_file: str | None, fallback_dirname: str) -> Path:
+    """
+    Resolve a registry 'file' (e.g., 'M0001.yml') under the directory declared
+    in system.paths (e.g. microbes_dir). Falls back to <root>/<fallback_dirname>.
+    """
+    base_dir = _resolve(root, dir_from_paths) or (root / fallback_dirname)
+    if not entry_file:
+        raise ValueError(f"Missing 'file' in registry entry for {fallback_dirname[:-1]}")
+    p = Path(entry_file)
+    return (base_dir / p) if not p.is_absolute() else p
 
 # ---------- public API ----------
 
 def load_system(system_yml: Path) -> dict:
     """
-    Load system.yml and resolve:
-      - root
-      - paths (config_dir, environments_dir, spots_dir, microbes_dir)
-      - ecology_cfg, metabolism_cfg (resolved to files)
-      - environment_files (list of Paths)
-      - microbe_registry (dict id -> microbe.yml Path)
+    Loads system.yml and returns:
+      {
+        "root": <Path>,
+        "system": <dict>,
+        "paths": <dict>,
+        "ecology_cfg": <Path | None>,
+        "metabolism_cfg": <Path | None>,
+        "environment_files": [Path, ...],
+        "microbe_files": [Path, ...],
+      }
+    All paths are resolved relative to system.yml and the configured dirs.
     """
     system_yml = Path(system_yml).resolve()
     root = system_yml.parent
-    sysd = _read_yaml(system_yml).get("system", {})
+    sysd = _read_yaml(system_yml).get("system") or {}
 
-    # paths section (with defaults)
-    paths = sysd.get("paths") or {}
+    paths: Dict = sysd.get("paths") or {}
     config_dir = _resolve(root, paths.get("config_dir")) or (root / "config")
     envs_dir   = _resolve(root, paths.get("environments_dir")) or (root / "environments")
     spots_dir  = _resolve(root, paths.get("spots_dir")) or (root / "spots")
     microbes_dir = _resolve(root, paths.get("microbes_dir")) or (root / "microbes")
 
-    # config.ecology / config.metabolism (relative to config_dir unless absolute)
-    config_map = sysd.get("config") or {}
-    ecology_cfg    = _resolve(config_dir, config_map.get("ecology")) if config_map.get("ecology") else None
-    metabolism_cfg = _resolve(config_dir, config_map.get("metabolism")) if config_map.get("metabolism") else None
+    # Configs
+    cfg_block = sysd.get("config") or {}
+    ecology_cfg    = _resolve(config_dir, cfg_block.get("ecology")) if cfg_block.get("ecology") else None
+    metabolism_cfg = _resolve(config_dir, cfg_block.get("metabolism")) if cfg_block.get("metabolism") else None
 
-    # environments registry: supports [{id,file}, ...] or ["E001.yml", "E002.yml"] or ["E001", ...]
-    env_specs = ((sysd.get("registry") or {}).get("environments") or [])
+    # Registry
+    reg = sysd.get("registry") or {}
+    env_specs = reg.get("environments") or []
+    mic_specs = reg.get("microbes") or []
+
+    # Resolve environment files
     env_files: List[Path] = []
-    if env_specs:
-        for it in env_specs:
-            if isinstance(it, str):
-                f = it if it.endswith(".yml") else f"{it}.yml"
-                env_files.append((envs_dir / f).resolve())
-            elif isinstance(it, dict):
-                fid = it.get("file") or (it.get("id") and f"{it['id']}.yml")
-                if fid:
-                    p = Path(fid)
-                    env_files.append(p if p.is_absolute() else (envs_dir / p).resolve())
-    else:
-        env_files = sorted(envs_dir.glob("*.yml"))
+    for e in env_specs:
+        if isinstance(e, str):
+            # "E001" or "E001.yml"
+            fname = e if e.endswith(".yml") else f"{e}.yml"
+            env_files.append(envs_dir / fname)
+        elif isinstance(e, dict):
+            fid = e.get("file") or (f"{e.get('id')}.yml" if e.get("id") else None)
+            if fid:
+                env_files.append(_resolve_under_dir(root, paths.get("environments_dir"), fid, "environments"))
+    env_files = [p.resolve() for p in env_files if p and p.exists()]
 
-    env_files = [p for p in env_files if p.exists()]
-
-    # microbes registry: [{id,file}, ...] or ["M0001.yml"] or ["M0001", ...]
-    micro_specs = ((sysd.get("registry") or {}).get("microbes") or [])
-    microbe_registry: Dict[str, Path] = {}
-    if micro_specs:
-        for it in micro_specs:
-            if isinstance(it, str):
-                mid = it.removesuffix(".yml")
-                f = (microbes_dir / f"{mid}.yml").resolve()
-                microbe_registry[mid] = f
-            elif isinstance(it, dict):
-                mid = it.get("id")
-                mf  = it.get("file") or (mid and f"{mid}.yml")
-                if mid and mf:
-                    p = Path(mf)
-                    microbe_registry[mid] = (p if p.is_absolute() else (microbes_dir / p)).resolve()
-    else:
-        # auto-discover
-        for p in sorted(microbes_dir.glob("*.yml")):
-            microbe_registry[p.stem] = p.resolve()
+    # Resolve microbe files
+    microbe_files: List[Path] = []
+    for m in mic_specs:
+        if isinstance(m, str):
+            fname = m if m.endswith(".yml") else f"{m}.yml"
+            microbe_files.append(microbes_dir / fname)
+        elif isinstance(m, dict):
+            fid = m.get("file") or (f"{m.get('id')}.yml" if m.get("id") else None)
+            if fid:
+                microbe_files.append(_resolve_under_dir(root, paths.get("microbes_dir"), fid, "microbes"))
+    microbe_files = [p.resolve() for p in microbe_files if p and p.exists()]
 
     return {
-        "root": str(root),
+        "root": root,
         "system": sysd,
         "paths": {
             "config_dir": str(config_dir),
@@ -90,62 +97,88 @@ def load_system(system_yml: Path) -> dict:
             "spots_dir": str(spots_dir),
             "microbes_dir": str(microbes_dir),
         },
-        "ecology_cfg": str(ecology_cfg) if ecology_cfg else None,
-        "metabolism_cfg": str(metabolism_cfg) if metabolism_cfg else None,
+        "ecology_cfg": ecology_cfg,
+        "metabolism_cfg": metabolism_cfg,
         "environment_files": env_files,
-        "microbe_registry": microbe_registry,
+        "microbe_files": microbe_files,
     }
 
 def iter_spot_files_for_env(env_file: Path, sys_paths: Dict) -> List[Tuple[str, Path]]:
-    """Return [(spot_id, spot_path)] for an environment.yml, honoring per-env list or dir."""
-    env = _read_yaml(env_file).get("environment", {})
+    """
+    Returns [(spot_id, spot_path), ...] for an environment YAML.
+    Resolution priority:
+      1) env.spots_dir (relative to env file)
+      2) system.paths.spots_dir (relative to system root)
+      3) <env_file_dir>/spots
+    If env lists explicit {id,file}, resolve those relative to chosen spots_dir.
+    """
+    env = _read_yaml(env_file).get("environment") or {}
     base = env_file.parent
 
-    # Resolve candidate spots base directory:
+    # Candidates
     env_spots_dir = env.get("spots_dir")
+    sys_spots_dir = sys_paths.get("spots_dir")
     if env_spots_dir:
         spots_base = _resolve(base, env_spots_dir)
+    elif sys_spots_dir:
+        spots_base = Path(sys_spots_dir)
     else:
-        # fall back to system-level spots_dir colocated with system root
-        sys_spots_dir = sys_paths.get("spots_dir")
-        spots_base = Path(sys_spots_dir) if sys_spots_dir else (base / "spots")
+        spots_base = base / "spots"
 
     out: List[Tuple[str, Path]] = []
-
-    # explicit list
-    listed = env.get("spots")
-    if isinstance(listed, list) and listed:
-        for s in listed:
-            sid = s.get("id") or s.get("name")
-            f = s.get("file")
+    if env.get("spots"):
+        for s in env["spots"]:
+            sid = s.get("id")
+            f   = s.get("file")
             if not sid or not f:
                 continue
             p = Path(f)
-            spath = p if p.is_absolute() else ((spots_base / p) if p.parent == Path(".") else (base / p))
+            spath = (spots_base / p) if not p.is_absolute() else p
             out.append((sid, spath.resolve()))
         return out
 
-    # else glob directory
     if spots_base and spots_base.exists():
         for p in sorted(spots_base.glob("*.yml")):
             out.append((p.stem, p.resolve()))
     return out
 
 def read_spot_yaml(spot_path: Path) -> dict:
-    return _read_yaml(Path(spot_path))
+    return _read_yaml(spot_path).get("spot") or {}
 
-def read_microbe_yaml(microbe_id_or_path: str | Path, sys_info: dict | None = None) -> Optional[dict]:
+def read_environment_yaml(env_path: Path) -> dict:
+    return _read_yaml(env_path).get("environment") or {}
+
+def read_microbe_yaml(mid: str, sys_info: dict) -> dict | None:
     """
-    Load microbe YAML either by absolute/relative path, or by ID via sys_info['microbe_registry'].
+    Load a microbe YAML given its ID and the system info (to resolve paths).
+    Returns the parsed YAML with an extra key '__file__' pointing to its file path.
     """
-    if isinstance(microbe_id_or_path, (str, Path)):
-        p = Path(microbe_id_or_path)
-        if p.suffix.lower() == ".yml" and p.exists():
-            return _read_yaml(p)
-        # try resolve via registry
-        if sys_info and isinstance(microbe_id_or_path, str):
-            reg = sys_info.get("microbe_registry", {})
-            mp = reg.get(microbe_id_or_path)
-            if mp and Path(mp).exists():
-                return _read_yaml(Path(mp))
-    return None
+    microbes_dir = Path(sys_info["paths"].get("microbes_dir") or "microbes")
+    root = Path(sys_info["root"])
+    m_path = None
+
+    # Resolve from registry
+    registry = ((sys_info.get("system") or {}).get("registry") or {}).get("microbes", [])
+    for entry in registry:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("id") == mid:
+            m_path = entry.get("file")
+            if m_path:
+                m_path = Path(m_path)
+                if not m_path.is_absolute():
+                    m_path = root / microbes_dir / m_path
+            break
+
+    # fallback if not found
+    if not m_path:
+        candidate = root / microbes_dir / f"{mid}.yml"
+        if candidate.exists():
+            m_path = candidate
+
+    if not m_path or not m_path.exists():
+        return None
+
+    data = _read_yaml(m_path)
+    data["__file__"] = str(m_path)
+    return data

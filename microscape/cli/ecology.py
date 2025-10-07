@@ -1,56 +1,74 @@
-# microscape/cli/ecology.py
 from __future__ import annotations
 from pathlib import Path
-from typing import List
-import json, typer
+from typing import List, Dict, Any
+import csv, json, typer
 from rich.progress import Progress
-from ..io.system_loader import load_system, iter_spot_files_for_env, read_spot_yaml
-from ..profile.ecology import profile_spot  # your working ecology logic
 
-app = typer.Typer(add_completion=False, no_args_is_help=True)
+from ..io.system_loader import load_system, iter_spot_files_for_env
+from ..profile.ecology import load_rules, profile_spot
+
+app = typer.Typer(add_completion=False)
 
 @app.command("ecology")
 def ecology_cmd(
     system_yml: Path = typer.Argument(..., help="Path to system.yml"),
-    outdir: Path = typer.Option("outputs/ecology", help="Output directory"),
-    verbose: bool = typer.Option(False, "--verbose", "-v")
+    outdir: Path = typer.Option("outputs/profile", help="Output directory"),
 ):
+    """
+    Run ecology profiling over all spots defined in system.yml.
+    Produces:
+      - profile_summary.csv  (row per spot x microbe)
+      - profile_summary.json (same content as JSON)
+      - one enriched spot YAML per spot (future extension)
+    """
     sys_info = load_system(system_yml)
     root = Path(sys_info["root"])
-    ecology_cfg = sys_info.get("ecology_cfg")
+    ecology_cfg = sys_info["ecology_cfg"]
     env_files: List[Path] = sys_info["environment_files"]
 
     if not ecology_cfg or not Path(ecology_cfg).exists():
-        typer.secho("Ecology rules not found. Ensure system.config.ecology points to a file.", fg=typer.colors.RED)
+        typer.secho("Ecology rules not found. Ensure system.config.ecology points to a valid file.", fg=typer.colors.RED)
         raise typer.Exit(1)
 
-    outdir = Path(outdir); outdir.mkdir(parents=True, exist_ok=True)
-    summary_rows = []
+    rules = load_rules(Path(ecology_cfg))
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
 
-    typer.echo("🧭 Profiling ecology")
-    typer.echo(f"  system : {system_yml.resolve()}")
-    typer.echo(f"  rules  : {ecology_cfg}")
-    typer.echo(f"  out    : {outdir.resolve()}")
+    # Collect rows
+    all_rows: List[Dict[str, Any]] = []
 
     with Progress() as prog:
-        task = prog.add_task("[cyan]Profiling…", total=len(env_files) or 1)
+        task = prog.add_task("[cyan]Profiling…", total=len(env_files) if env_files else 1)
         for env_file in env_files:
-            for sid, spath in iter_spot_files_for_env(env_file, sys_info["paths"]):
-                spot = read_spot_yaml(spath).get("spot", {})
-                rows = profile_spot(spot, ecology_cfg)
-                # add spot id to rows
-                for r in rows:
-                    r["spot_id"] = sid
-                summary_rows.extend(rows)
+            # iterate spots for this env
+            for _, spot_path in iter_spot_files_for_env(env_file, sys_info["paths"]):
+                rows = profile_spot(spot_path, rules)
+                all_rows.extend(rows)
             prog.advance(task)
 
-    # write outputs
-    (outdir / "profile_summary.json").write_text(json.dumps(summary_rows, indent=2))
-    # CSV (flat)
-    import csv
-    if summary_rows:
-        cols = sorted({k for r in summary_rows for k in r.keys()})
-        with open(outdir / "profile_summary.csv", "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=cols); w.writeheader(); w.writerows(summary_rows)
+    # Write CSV & JSON
+    out_csv = outdir / "ecology_summary.csv"
+    out_json = outdir / "ecology_summary.json"
+
+    # Determine a stable header (union of keys)
+    header_keys: List[str] = []
+    for r in all_rows:
+        for k in r.keys():
+            if k not in header_keys:
+                header_keys.append(k)
+    # Ensure common columns lead
+    lead = [c for c in ["spot", "microbe", "abundance"] if c in header_keys]
+    tail = [c for c in header_keys if c not in lead]
+    header = lead + tail
+
+    with out_csv.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=header)
+        w.writeheader()
+        for r in all_rows:
+            w.writerow(r)
+
+    out_json.write_text(json.dumps(all_rows, indent=2))
 
     typer.secho("✅ Ecology profiling complete.", fg=typer.colors.GREEN)
+    typer.echo(f"CSV : {out_csv}")
+    typer.echo(f"JSON: {out_json}")
