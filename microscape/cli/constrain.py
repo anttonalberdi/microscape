@@ -96,10 +96,45 @@ def _build_env_bounds(
     return env_bounds
 
 
+def _select_transcripts(spot: dict, mid: str, sid: str) -> Dict[str, float]:
+    """
+    Robustly select a gene->TPM dict for this spot×microbe.
+    Supports:
+      1) per-microbe dict: values[mid] = {gene: tpm, ...}
+      2) shared per-spot dict: values = {gene: tpm, ...}
+      3) nested dicts under keys like 'all', spot id/name, etc.
+    Returns {} if nothing sensible is found.
+    """
+    tx_root = ((spot.get("measurements") or {}).get("transcripts") or {}).get("values") or {}
+    if not isinstance(tx_root, dict):
+        return {}
+
+    # 1) direct per-microbe
+    v = tx_root.get(mid)
+    if isinstance(v, dict) and v:
+        return v
+
+    # 2) flat dict (shared for everyone)
+    # heuristic: all values are scalar-like (numbers/str)
+    if tx_root and all(not isinstance(x, dict) for x in tx_root.values()):
+        return tx_root  # assume {gene: TPM}
+
+    # 3) look for common keys then fallback to first dict value
+    for key in (sid, spot.get("name"), spot.get("id"), "all", "ALL", "default", "shared"):
+        if key and isinstance(tx_root.get(key), dict) and tx_root.get(key):
+            return tx_root[key]
+
+    for _k, _v in tx_root.items():
+        if isinstance(_v, dict) and _v:
+            return _v
+
+    return {}
+
+
 def _build_tx_bounds(
     model,
     base_bounds: Dict[str, Tuple[float, float, str]],
-    gene_tpm: Dict[str, float],
+    gene_tpm_in: Dict[str, float],
 ) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
     """
     TPM → reaction activity via GPRs (AND=min, OR=max).
@@ -110,11 +145,23 @@ def _build_tx_bounds(
     Exchanges are governed by environmental rules.
     """
     tx_bounds: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+    if not gene_tpm_in:
+        return tx_bounds
+
+    # case-insensitive gene matching (GPR tokens vs TPM keys)
+    # keep numeric conversion robust
+    gene_tpm = {}
+    for g, v in gene_tpm_in.items():
+        try:
+            gene_tpm[str(g).lower()] = float(v)
+        except Exception:
+            continue
+
     if not gene_tpm:
         return tx_bounds
 
-    max_tpm = max((float(v) for v in gene_tpm.values() if v is not None), default=0.0)
-    gene_act = {g: (float(v) / max_tpm if max_tpm > 0 else 0.0) for g, v in gene_tpm.items() if v is not None}
+    max_tpm = max(gene_tpm.values()) if gene_tpm else 0.0
+    gene_act = {g: (val / max_tpm if max_tpm > 0 else 0.0) for g, val in gene_tpm.items()}
 
     import re
 
@@ -122,7 +169,8 @@ def _build_tx_bounds(
         rule = rule or ""
         if not rule.strip():
             return 1.0
-        toks = re.findall(r"[A-Za-z0-9_]+|\(|\)|and|or", rule, flags=re.IGNORECASE)
+        # allow underscores, dots, and hyphens in gene IDs
+        toks = re.findall(r"[A-Za-z0-9_.-]+|\(|\)|and|or", rule, flags=re.IGNORECASE)
         pos = 0
 
         def parse_expr():
@@ -150,14 +198,15 @@ def _build_tx_bounds(
                 assert toks[pos] == ")"
                 pos += 1
                 return v
-            return float(gene_act.get(tok, 0.0))
+            # gene symbol; look up case-insensitively
+            return float(gene_act.get(tok.lower(), 0.0))
 
         try:
             pos = 0
             v = parse_expr()
             return max(0.0, min(1.0, float(v)))
         except Exception:
-            return 1.0
+            return 1.0  # fail open (do not over-constrain)
 
     for rxn in model.reactions:
         rid = rxn.id
@@ -273,10 +322,11 @@ def constrain_cmd(
 
                     tx_bounds: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
                     if mode_l in ("transcriptional", "combined"):
-                        tx_for_microbe = (
-                            ((spot.get("measurements") or {}).get("transcripts") or {}).get("values") or {}
-                        ).get(mid) or {}
-                        tx_bounds = _build_tx_bounds(model, base_bounds, tx_for_microbe)
+                        # ✅ robust transcript selection
+                        gene_tpm = _select_transcripts(spot, mid, sid)
+                        tx_bounds = _build_tx_bounds(model, base_bounds, gene_tpm)
+                        if verbose and not gene_tpm:
+                            typer.echo(f"INFO: no transcripts found for {sid} × {mid}; internal bounds unchanged")
 
                     summary_row, reaction_rows = constrain_one(
                         spot_id=sid,
@@ -297,10 +347,7 @@ def constrain_cmd(
                     for rr in reaction_rows:
                         rid = rr.get("react_id") or rr.get("reaction") or rr.get("id")
                         if rid is None:
-                            # skip malformed row defensively
                             continue
-
-                        # robustly get reaction type: prefer rr["rtype"], then rr["type"], else infer
                         rr_type = rr.get("rtype") or rr.get("type") or ("exchange" if str(rid).startswith("EX_") else "internal")
 
                         # rich record for humans

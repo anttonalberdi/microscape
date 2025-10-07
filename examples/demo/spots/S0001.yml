@@ -238,3 +238,5 @@ spot:
           G0010: 55
           G0011: 33
           G0012: 224
+  qc:
+    passed: true
