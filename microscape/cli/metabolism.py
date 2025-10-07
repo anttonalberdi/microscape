@@ -54,12 +54,8 @@ def _build_constraints_index(detail: dict) -> dict:
     spots_node = detail.get("spots") or {}
 
     # Compact shape: spots -> spot_id -> microbes -> mid -> reactions -> rid: {lb,ub}
-    compact = True
-    for k, v in spots_node.items():
-        if not (isinstance(v, dict) and "microbes" in v):
-            compact = False
-            break
-    if compact and spots_node:
+    compact = bool(spots_node) and all(isinstance(v, dict) and "microbes" in v for v in spots_node.values())
+    if compact:
         for sid, s_node in spots_node.items():
             microbes = (s_node or {}).get("microbes") or {}
             for mid, m_node in microbes.items():
@@ -147,6 +143,11 @@ def metabolism_cmd(
 ):
     """
     Profile steady-state metabolism per spot×microbe with optional constraints.
+    Also writes a TSV named by constraint type:
+      metabolism_unconstrained.tsv
+      metabolism_constrained_environmental.tsv
+      metabolism_constrained_transcriptional.tsv
+      metabolism_constrained_combined.tsv
     """
     outdir = outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
@@ -164,6 +165,7 @@ def metabolism_cmd(
 
     # 2) read & validate constraints (STRICT by default)
     constraints_idx: Dict[str, Dict[str, Dict[str, Tuple[Optional[float], Optional[float]]]]] = {}
+    constraints_mode_label: Optional[str] = None  # 'environmental' | 'transcriptional' | 'combined' | 'custom'
     if constraints:
         cpath = Path(constraints)
         if not cpath.exists():
@@ -174,6 +176,13 @@ def metabolism_cmd(
         except Exception as e:
             typer.secho(f"Constraints file is not valid JSON: {e}", fg=typer.colors.RED)
             raise typer.Exit(2)
+
+        # detect mode label for output naming
+        raw_mode = str(detail.get("mode", "")).lower().strip()
+        if raw_mode in {"environmental", "transcriptional", "combined"}:
+            constraints_mode_label = raw_mode
+        elif raw_mode:
+            constraints_mode_label = "custom"
 
         constraints_idx = _build_constraints_index(detail)
 
@@ -196,7 +205,6 @@ def metabolism_cmd(
                 "Constraints loaded but do not apply to any spot×microbe in this run. "
                 "Check spot IDs and microbe IDs.", fg=typer.colors.RED
             )
-            # Helpful context
             if verbose:
                 typer.echo(f"Planned spots: {sorted(planned_spots)}")
                 typer.echo(f"Constraints spots: {sorted(constraints_idx.keys())}")
@@ -230,6 +238,7 @@ def metabolism_cmd(
 
     all_rows: List[Dict[str, Any]] = []
     per_spot_json: Dict[str, Any] = {}
+    applied_any_constraints = False  # track if at least one bound was set from constraints
 
     with Progress() as prog:
         task = prog.add_task("[cyan]Profiling metabolism…", total=total_spots)
@@ -273,10 +282,12 @@ def metabolism_cmd(
                     # Constraints-based final bounds (override)
                     applied_constraints = []
                     missing_constraints = []
-                    if spot_id in constraints_idx and mid in constraints_idx[spot_id]:
+                    if constraints_idx and (spot_id in constraints_idx) and (mid in constraints_idx[spot_id]):
                         applied_constraints, missing_constraints = _apply_constraints_to_model(
                             model, constraints_idx[spot_id][mid]
                         )
+                        if applied_constraints:
+                            applied_any_constraints = True
                         if constraints_strict and missing_constraints:
                             typer.secho(
                                 f"Constraints reference unknown reactions for {spot_id} × {mid}: "
@@ -306,7 +317,7 @@ def metabolism_cmd(
                     except Exception as e:
                         per_microbe[mid] = {"status": "solve_error", "detail": str(e)}
 
-                    # Flat row for CSV
+                    # Flat row for CSV/TSV
                     last = per_microbe[mid]
                     row = {
                         "spot_id": spot_id,
@@ -321,21 +332,38 @@ def metabolism_cmd(
                 per_spot_json[spot_id] = {"spot_id": spot_id, "microbes": per_microbe}
                 prog.advance(task)
 
-    # 5) write outputs
+    # 5) write outputs (JSON + CSV unchanged for backward compatibility)
     (outdir / "metabolism_summary.json").write_text(jsonlib.dumps(per_spot_json, indent=2))
+
+    # dynamic columns
     cols = ["spot_id", "microbe", "status", "objective"]
     for r in all_rows:
         for k in r:
             if k not in cols:
                 cols.append(k)
+
+    # legacy CSV (unchanged)
     with (outdir / "metabolism_summary.csv").open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
         for r in all_rows:
             w.writerow(r)
 
+    # NEW: TSV named by constraint type
+    if applied_any_constraints:
+        label = constraints_mode_label or "custom"
+        tsv_name = f"metabolism_constrained_{label}.tsv"
+    else:
+        tsv_name = "metabolism_unconstrained.tsv"
+
+    with (outdir / tsv_name).open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t")
+        w.writeheader()
+        for r in all_rows:
+            w.writerow(r)
+
     typer.echo(f"\n🧪 Metabolism profiling complete.")
-    typer.echo(f"  Spots processed : {total_spots}")
     typer.echo(f"  Rows written    : {len(all_rows)}")
-    typer.echo(f"  CSV             : {(outdir / 'metabolism_summary.csv')}")
+    typer.echo(f"  Legacy CSV      : {(outdir / 'metabolism_summary.csv')}")
     typer.echo(f"  JSON            : {(outdir / 'metabolism_summary.json')}")
+    typer.echo(f"  Named TSV       : {(outdir / tsv_name)}")
