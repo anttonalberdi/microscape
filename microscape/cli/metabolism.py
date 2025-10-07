@@ -2,7 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Any, List
-import json, csv, typer
+import json as jsonlib, csv, typer
 from rich.progress import Progress
 import numpy as np
 
@@ -184,7 +184,7 @@ def metabolism_cmd(
                 prog.advance(task)
 
     # 4) write outputs
-    (outdir / "metabolism_summary.json").write_text(json.dumps(per_spot_json, indent=2))
+    (outdir / "metabolism_summary.json").write_text(jsonlib.dumps(per_spot_json, indent=2))
     cols = ["spot_id", "microbe", "status", "objective"]
     for r in all_rows:
         for k in r:
