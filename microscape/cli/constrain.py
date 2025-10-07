@@ -4,20 +4,29 @@ import json, csv, typer
 from pathlib import Path
 from datetime import datetime, timezone
 from rich.progress import Progress
-from typing import Dict, List, Tuple
-from math import isfinite
+from typing import Dict, List, Tuple, Optional
 
-from ..io.system_loader import load_system, iter_spot_files_for_env, read_spot_yaml, read_microbe_yaml
-from ..io.metabolism_rules import load_rules, MetabolismRules, expr_to_exchange_bounds
+from ..io.system_loader import (
+    load_system,
+    iter_spot_files_for_env,
+    read_spot_yaml,
+    read_microbe_yaml,
+)
+from ..io.metabolism_rules import load_rules, MetabolismRules
 from ..runner.constraints import constrain_one
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
+
 @app.command("constrain")
 def constrain_cmd(
     system_yml: Path = typer.Argument(..., help="Path to system.yml"),
-    mode: str = typer.Option("combined", "--mode", case_sensitive=False,
-                             help="Constraint source: environmental | transcriptional | combined"),
+    mode: str = typer.Option(
+        "combined",
+        "--mode",
+        case_sensitive=False,
+        help="Constraint source: environmental | transcriptional | combined",
+    ),
     outdir: Path = typer.Option("outputs/constraints", help="Output directory"),
     write_json: bool = typer.Option(True, "--json/--no-json", help="Write per-reaction JSON"),
     write_csv: bool = typer.Option(True, "--csv/--no-csv", help="Write summary TSV"),
@@ -25,55 +34,50 @@ def constrain_cmd(
 ):
     """
     Build constraints for each spot×microbe and write:
-    - summary TSV (one row per spot×microbe)
-    - detailed per-reaction JSON (consumable by metabolism)
+      - summary TSV (one row per spot×microbe)
+      - detailed per-reaction JSON (consumable by metabolism)
     """
     sys_info = load_system(system_yml)
     env_files = sys_info["environment_files"]
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # Resolve environmental mapping rules (your existing metabolism.yml use)
+    # Resolve environmental mapping rules (same config used by metabolism CLI)
     metab_cfg_path = sys_info.get("metabolism_cfg")
-    rules = load_rules(metab_cfg_path) if metab_cfg_path else None
+    rules: Optional[MetabolismRules] = load_rules(metab_cfg_path) if metab_cfg_path else None
 
     summary_rows: List[Dict] = []
     detail_nested: Dict = {
         "system": str(system_yml.resolve()),
         "mode": mode.lower(),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "solver": getattr(rules, "solver", None) if rules else None,
-        "spots": {}
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "spots": {},
     }
 
     mode_l = mode.lower()
-    if mode_l not in ("environmental","transcriptional","combined"):
+    if mode_l not in ("environmental", "transcriptional", "combined"):
         raise typer.BadParameter("mode must be one of: environmental | transcriptional | combined")
 
+    # ---------- helpers ----------
     def _rxn_type(r) -> str:
-        # Fast path by naming convention
+        # Naming + topology heuristics
         if r.id.startswith("EX_"):
             return "exchange"
-
         mets = list(r.metabolites.keys())
         if len(mets) == 1:
-            # Single-metabolite stoichiometry is typical for exchanges
             return "exchange"
-
-        comps = {m.compartment for m in mets if hasattr(m, "compartment")}
+        comps = {getattr(m, "compartment", None) for m in mets}
         if "e" in comps and any(c != "e" for c in comps):
             return "transport"
         if comps == {"e"}:
-            # Edge case: multi-stoich in extracellular only → treat as exchange
             return "exchange"
         return "internal"
-    
+
     def get_base_bounds(model):
         out = {}
         for r in model.reactions:
             lb0 = float(r.lower_bound)
             ub0 = float(r.upper_bound)
-            rtype = _rxn_type(r)
-            out[r.id] = (lb0, ub0, rtype)
+            out[r.id] = (lb0, ub0, "exchange" if _rxn_type(r) == "exchange" else "internal")
         return out
 
     def build_env_bounds(
@@ -189,26 +193,29 @@ def constrain_cmd(
 
         return tx_bounds
 
+    # ---------- main ----------
     with Progress() as prog:
-        task = prog.add_task("[cyan]Constraining…", total=len(env_files))
-        for env_file in env_files:
-            for _, spot_path in iter_spot_files_for_env(env_file, sys_info["paths"]):
-                spot = read_spot_yaml(spot_path)
-                sid = spot.get("name") or spot.get("id") or spot_path.stem
+        task = prog.add_task("Constraining models", total=len(env_files))
+        for env_path in env_files:
+            env = read_spot_yaml(env_path)  # environment yaml
+            env_id = (env.get("environment") or {}).get("id") or env_path.stem
+            detail_nested["spots"][env_id] = {"spots": {}}
 
-                # Spot metabolite concentrations (for env constraints)
+            for sid, spot_path in iter_spot_files_for_env(env_path, sys_info):
+                spot = read_spot_yaml(spot_path) or {}
                 met_vals = ((spot.get("measurements") or {}).get("metabolites") or {}).get("values") or {}
-
-                # For each microbe we actually observe in this spot (or all in registry; pick your policy)
                 microbes_vals = ((spot.get("measurements") or {}).get("microbes") or {}).get("values") or {}
+
+                per_microbe_detail: Dict = {}
                 for mid in microbes_vals.keys():
                     myml = read_microbe_yaml(mid, sys_info)  # resolves via system paths
                     if not myml:
-                        if verbose: typer.echo(f"WARN: Microbe YAML not found for {mid}")
+                        if verbose:
+                            typer.echo(f"WARN: Microbe YAML not found for {mid}")
                         continue
                     model_path = (Path(myml["__file__"]).parent / myml["microbe"]["model"]["path"]).resolve()
 
-                    # Load model (cobra already installed in your env)
+                    # Load model
                     import cobra
                     try:
                         model = cobra.io.read_sbml_model(str(model_path))
@@ -274,7 +281,7 @@ def constrain_cmd(
         tsv = outdir / f"{stem}.tsv"
         with tsv.open("w", newline="") as fh:
             w = csv.writer(fh, delimiter="\t")
-            w.writerow(["spot_id","microbe","mode","changed_ex","changed_internal","warnings"])
+            w.writerow(["spot_id", "microbe", "mode", "changed_ex", "changed_internal", "warnings"])
             for r in summary_rows:
                 w.writerow([r["spot_id"], r["microbe"], r["mode"], r["changed_ex"], r["changed_internal"], r["warnings"]])
         typer.echo(f"Summary TSV : {tsv}")
