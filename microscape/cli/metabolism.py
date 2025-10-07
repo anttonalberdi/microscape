@@ -275,6 +275,7 @@ def metabolism_cmd(
                     # Load SBML
                     try:
                         with _suppress_no_objective_on_read():
+                            print("test")
                             model = cobra.io.read_sbml_model(str(sbml_path))
                     except Exception as e:
                         per_microbe[mid] = {"status": "sbml_load_error", "detail": str(e)}
