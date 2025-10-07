@@ -6,7 +6,7 @@ import json, typer, csv
 from rich.progress import Progress
 from ..io.system_loader import load_system, iter_spot_files_for_env, read_spot_yaml, read_microbe_yaml
 from ..io.metabolism_rules import load_rules, MetabolismRules
-from ..runner.metabolism import profile_spot_metabolism  # your steady-state FBA function
+from ..profile.metabolism import profile_spot_metabolism  # your steady-state FBA function
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
