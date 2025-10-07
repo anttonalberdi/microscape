@@ -143,11 +143,9 @@ def metabolism_cmd(
 ):
     """
     Profile steady-state metabolism per spot×microbe with optional constraints.
-    Also writes a TSV named by constraint type:
-      metabolism_unconstrained.tsv
-      metabolism_constrained_environmental.tsv
-      metabolism_constrained_transcriptional.tsv
-      metabolism_constrained_combined.tsv
+    Writes:
+      - legacy: metabolism_summary.csv & metabolism_summary.json (unchanged, no extra echo)
+      - named:  metabolism_unconstrained.csv/json OR metabolism_constrained_<mode>.csv/json
     """
     outdir = outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
@@ -317,7 +315,7 @@ def metabolism_cmd(
                     except Exception as e:
                         per_microbe[mid] = {"status": "solve_error", "detail": str(e)}
 
-                    # Flat row for CSV/TSV
+                    # Flat row for CSVs
                     last = per_microbe[mid]
                     row = {
                         "spot_id": spot_id,
@@ -332,38 +330,42 @@ def metabolism_cmd(
                 per_spot_json[spot_id] = {"spot_id": spot_id, "microbes": per_microbe}
                 prog.advance(task)
 
-    # 5) write outputs (JSON + CSV unchanged for backward compatibility)
+    # 5) write outputs
+    # legacy (unchanged; kept for compatibility; no extra echo)
     (outdir / "metabolism_summary.json").write_text(jsonlib.dumps(per_spot_json, indent=2))
-
-    # dynamic columns
     cols = ["spot_id", "microbe", "status", "objective"]
     for r in all_rows:
         for k in r:
             if k not in cols:
                 cols.append(k)
-
-    # legacy CSV (unchanged)
     with (outdir / "metabolism_summary.csv").open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
         for r in all_rows:
             w.writerow(r)
 
-    # NEW: TSV named by constraint type
+    # named outputs (CSV + JSON), based on constraints type
     if applied_any_constraints:
-        label = constraints_mode_label or "custom"
-        tsv_name = f"metabolism_constrained_{label}.tsv"
+        label = (constraints_mode_label or "custom")
+        base = f"metabolism_constrained_{label}"
     else:
-        tsv_name = "metabolism_unconstrained.tsv"
+        base = "metabolism_unconstrained"
 
-    with (outdir / tsv_name).open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t")
+    named_csv = outdir / f"{base}.csv"
+    named_json = outdir / f"{base}.json"
+
+    # write named JSON (same structure as legacy JSON)
+    named_json.write_text(jsonlib.dumps(per_spot_json, indent=2))
+
+    # write named CSV (same columns as legacy CSV)
+    with named_csv.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
         for r in all_rows:
             w.writerow(r)
 
+    # concise report
     typer.echo(f"\n🧪 Metabolism profiling complete.")
-    typer.echo(f"  Rows written    : {len(all_rows)}")
-    typer.echo(f"  Legacy CSV      : {(outdir / 'metabolism_summary.csv')}")
-    typer.echo(f"  JSON            : {(outdir / 'metabolism_summary.json')}")
-    typer.echo(f"  Named TSV       : {(outdir / tsv_name)}")
+    typer.echo(f"  Rows written : {len(all_rows)}")
+    typer.echo(f"  Named CSV    : {named_csv}")
+    typer.echo(f"  Named JSON   : {named_json}")
