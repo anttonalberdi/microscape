@@ -331,19 +331,6 @@ def metabolism_cmd(
                 prog.advance(task)
 
     # 5) write outputs
-    # legacy (unchanged; kept for compatibility; no extra echo)
-    (outdir / "metabolism_summary.json").write_text(jsonlib.dumps(per_spot_json, indent=2))
-    cols = ["spot_id", "microbe", "status", "objective"]
-    for r in all_rows:
-        for k in r:
-            if k not in cols:
-                cols.append(k)
-    with (outdir / "metabolism_summary.csv").open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=cols)
-        w.writeheader()
-        for r in all_rows:
-            w.writerow(r)
-
     # named outputs (CSV + JSON), based on constraints type
     if applied_any_constraints:
         label = (constraints_mode_label or "custom")
