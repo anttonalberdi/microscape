@@ -116,18 +116,29 @@ def validate_system(system_yml: Path) -> Tuple[Dict[str, Any], List[str], List[s
     z_values: List[float] = []
 
     def _spot_pos(spot_obj: Dict[str, Any]):
-        # supports either "pos_um: [x,y,z?]" OR x_um/y_um/z_um
-        pos = spot_obj.get("pos_um")
-        if isinstance(pos, (list, tuple)) and len(pos) >= 2:
-            x, y = pos[0], pos[1]
-            z = pos[2] if len(pos) >= 3 else None
-            return x, y, z
-        x = spot_obj.get("x_um")
-        y = spot_obj.get("y_um")
-        z = spot_obj.get("z_um")
-        if x is not None and y is not None:
-            return x, y, z
-        return None
+
+        def extract(obj: Dict[str, Any] | None):
+            if not isinstance(obj, dict):
+                return None
+            # list-style
+            pos = obj.get("pos_um") or obj.get("position_um") or obj.get("pos")
+            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+                x, y = pos[0], pos[1]
+                z = pos[2] if len(pos) >= 3 else None
+                return x, y, z
+            # key-style
+            x = obj.get("x_um", obj.get("x"))
+            y = obj.get("y_um", obj.get("y"))
+            z = obj.get("z_um", obj.get("z"))
+            if x is not None and y is not None:
+                return x, y, z
+            return None
+
+        # Prefer nested 'position' if present, then fall back to top-level
+        nested = extract(spot_obj.get("position"))
+        if nested is not None:
+            return nested
+        return extract(spot_obj)
 
     for ef in env_files:
         try:
