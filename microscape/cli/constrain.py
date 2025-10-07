@@ -76,7 +76,7 @@ def constrain_cmd(
             out[r.id] = (lb0, ub0, rtype)
         return out
 
-   def build_env_bounds(
+    def build_env_bounds(
         base_bounds: Dict[str, Tuple[float, float, str]],
         spot_mets: Dict[str, float],
     ) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
@@ -210,21 +210,21 @@ def constrain_cmd(
 
                     # Load model (cobra already installed in your env)
                     import cobra
-                    model = cobra.io.read_sbml_model(str(model_path))
+                    try:
+                        model = cobra.io.read_sbml_model(str(model_path))
+                    except Exception as e:
+                        if verbose:
+                            typer.echo(f"ERROR loading SBML for {mid}: {e}")
+                        continue
 
                     base_bounds = get_base_bounds(model)
 
-                    # Build environmental bounds using your rules mapper (same logic used by metabolism)
-                    env_bounds: Dict[str, Tuple[float,float]] = {}
-                    if mode_l in ("environmental","combined") and rules:
-                        # map spot mM → exchange lb_env/ub_env
-                        for met_id, conc in met_vals.items():
-                            ex_id = rules.metabolite_map.get(met_id)
-                            if not ex_id: continue
-                            lb_env, ub_env = rules.uptake_to_bounds(conc)
-                            env_bounds[ex_id] = (lb_env, ub_env)
+                    # Environmental bounds from concentrations
+                    env_bounds: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+                    if mode_l in ("environmental", "combined") and rules:
+                        env_bounds = build_env_bounds(base_bounds, met_vals)
 
-                    # Build transcriptional bounds (toy example: close reactions with low marker expression)
+                    # Transcriptional bounds from per-spot TPMs
                     tx_bounds: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
                     if mode_l in ("transcriptional", "combined"):
                         tx_for_microbe = (
@@ -240,16 +240,18 @@ def constrain_cmd(
                         env_bounds=env_bounds,
                         tx_bounds=tx_bounds,
                     )
-                    summary_rows.append({"mode": mode_l, **summary_row})
+                    summary_row["mode"] = mode_l
+                    summary_rows.append(summary_row)
 
-                    # Stash into nested JSON
-                    dspot = detail_nested["spots"].setdefault(sid, {})
-                    dmic = dspot.setdefault(mid, {"reactions": {}, "summary": {}})
+                    # JSON assembly
+                    dspot = detail_nested["spots"][env_id]["spots"].setdefault(sid, {"microbes": {}})
+                    dmic = dspot["microbes"].setdefault(mid, {"reactions": {}, "summary": {}})
                     for rr in reaction_rows:
-                        rid = rr.pop("react_id")
-                        rtype = rr.pop("type")
-                        entry = {
-                            "type": rtype,
+                        rid = rr["react_id"]
+                        dmic["reactions"][rid] = {
+                            "rtype": rr["rtype"],
+                            "lb0": rr["lb0"],
+                            "ub0": rr["ub0"],
                             "lb_env": rr["lb_env"],
                             "ub_env": rr["ub_env"],
                             "lb_tx": rr["lb_tx"],
@@ -259,14 +261,12 @@ def constrain_cmd(
                             "changed": rr["changed"],
                             "notes": rr["notes"],
                         }
-                        dmic["reactions"][rid] = entry
                     dmic["summary"] = {
                         "changed_ex": summary_row["changed_ex"],
                         "changed_internal": summary_row["changed_internal"],
                         "warnings": summary_row["warnings"].split(";") if summary_row["warnings"] else [],
                     }
-
-            prog.advance(task)
+                prog.advance(task)
 
     # Write outputs
     stem = f"constraints__{mode_l}"
