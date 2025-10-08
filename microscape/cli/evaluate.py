@@ -174,7 +174,7 @@ def evaluate_cmd(
     for start in range(0, n_obs, chunk):
         end = min(n_obs, start + chunk)
         X_chunk = X_mat[start:end, :]  # (m, K)
-        base = alpha[..., None] + np.einsum("cdk,km->cdm", beta, X_chunk)
+        base = alpha[..., None] + np.einsum("cdk,mk->cdm", beta, X_chunk)
         if a_cage is not None and cage_idx is not None:
             idx = cage_idx[start:end]
             base = base + a_cage[:, :, idx]
