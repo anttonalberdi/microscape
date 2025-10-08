@@ -16,6 +16,7 @@ from .build import app as build_app
 from .train import app as train_app
 from .evaluate import app as evaluate_app
 from .predict import app as predict_app
+from .whatif import app as whatif_app
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(validate_app, name="") 
@@ -27,6 +28,7 @@ app.add_typer(build_app, name="")
 app.add_typer(train_app, name="")
 app.add_typer(evaluate_app, name="")
 app.add_typer(predict_app, name="")
+app.add_typer(whatif_app, name="")
 
 # Repository URL used for updates
 REPO_URL = "git+https://github.com/anttonalberdi/microscape.git"
