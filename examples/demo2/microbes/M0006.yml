@@ -1,0 +1,13 @@
+microbe:
+  id: M0006
+  label: Microbe_6
+  taxonomy:
+    phylum: Phylum6
+    class: Class6
+    order: Order6
+    family: Family6
+    genus: Genus6
+    species: Species1
+  model:
+    path: M0006.xml
+    format: sbml-l3v1-fbc2

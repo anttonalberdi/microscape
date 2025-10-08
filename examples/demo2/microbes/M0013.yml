@@ -1,0 +1,13 @@
+microbe:
+  id: M0013
+  label: Microbe_13
+  taxonomy:
+    phylum: Phylum6
+    class: Class12
+    order: Order13
+    family: Family12
+    genus: Genus6
+    species: Species2
+  model:
+    path: M0013.xml
+    format: sbml-l3v1-fbc2

@@ -1,0 +1,13 @@
+microbe:
+  id: M0001
+  label: Microbe_1
+  taxonomy:
+    phylum: Phylum1
+    class: Class1
+    order: Order1
+    family: Family1
+    genus: Genus1
+    species: Species1
+  model:
+    path: M0001.xml
+    format: sbml-l3v1-fbc2

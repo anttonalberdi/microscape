@@ -1,0 +1,16 @@
+ecology:
+  scoring:
+    mode: clip_linear # How to convert expression to a confidence score [0,1]
+  traits:
+    - id: adhesion
+      description: "Ability to adhere to surfaces"
+      states: [adhered, planktonic]
+      positive_state: adhered 
+      markers: [G0008]  
+      threshold: 10
+    - id: motility
+      description: "Ability to move"
+      states: [motile, sessile]
+      positive_state: motile
+      markers: [G0011,G0012]
+      threshold: 20

@@ -1,0 +1,67 @@
+# system.yml - Master file describing the overall experimental design and metadata
+system:
+  id: demo
+  description: "Gut microbiome sample from mouse"
+  author: "Antton Alberdi"
+  type: host # host, environment, laboratory
+
+  # Configuration
+
+  config:
+    ecology: ecology.yml
+    metabolism: metabolism.yml
+
+  paths:
+    config_dir: config
+    environments_dir: environments
+    spots_dir: spots
+    microbes_dir: microbes
+
+  #Experimental design
+
+  design:
+    factors:
+      treatment: ["diet_A", "diet_B"]
+      timepoint: ["T1", "T2"]
+    blocking:
+      block: ["cage1", "cage2"]
+
+  # Global registries for environments, microbes, and metabolites
+  registry:
+    environments:
+      - id: E001
+        file: E001.yml
+      - id: E002
+        file: E002.yml
+    microbes:
+      - id: M0001
+        file: M0001.yml
+      - id: M0002
+        file: M0002.yml
+      - id: M0003
+        file: M0003.yml
+      - id: M0004
+        file: M0004.yml
+      - id: M0005
+        file: M0005.yml
+      - id: M0006
+        file: M0006.yml
+      - id: M0007
+        file: M0007.yml
+      - id: M0008
+        file: M0008.yml
+      - id: M0009
+        file: M0009.yml
+      - id: M0010
+        file: M0010.yml
+      - id: M0011
+        file: M0011.yml
+      - id: M0012
+        file: M0012.yml
+      - id: M0013
+        file: M0013.yml
+      - id: M0014
+        file: M0014.yml
+      - id: M0015
+        file: M0015.yml
+

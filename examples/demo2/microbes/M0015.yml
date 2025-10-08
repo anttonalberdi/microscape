@@ -1,0 +1,13 @@
+microbe:
+  id: M0015
+  label: Microbe_15
+  taxonomy:
+    phylum: Phylum2
+    class: Class12
+    order: Order15
+    family: Family12
+    genus: Genus2
+    species: Species2
+  model:
+    path: M0015.xml
+    format: sbml-l3v1-fbc2

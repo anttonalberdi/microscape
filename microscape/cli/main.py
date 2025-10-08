@@ -12,6 +12,8 @@ from .ecology import app as ecology_app
 from .metabolism import app as metabolism_app
 from .constrain import app as constrain_app
 from .community import app as community_app
+from .build import app as build_app
+from .train import app as train_app
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(validate_app, name="") 
@@ -19,6 +21,8 @@ app.add_typer(ecology_app, name="")
 app.add_typer(metabolism_app, name="") 
 app.add_typer(constrain_app, name="")
 app.add_typer(community_app, name="")
+app.add_typer(build_app, name="")
+app.add_typer(train_app, name="")
 
 # Repository URL used for updates
 REPO_URL = "git+https://github.com/anttonalberdi/microscape.git"

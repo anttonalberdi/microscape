@@ -1,0 +1,13 @@
+microbe:
+  id: M0009
+  label: Microbe_9
+  taxonomy:
+    phylum: Phylum9
+    class: Class9
+    order: Order9
+    family: Family9
+    genus: Genus9
+    species: Species1
+  model:
+    path: M0009.xml
+    format: sbml-l3v1-fbc2
