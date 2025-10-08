@@ -17,6 +17,7 @@ dependencies:
   - python-libsbml=5.20.5
   - fastparquet=2024.11.0
   - pyarrow=21.0.0
+  - pymc=5.23.0
   - pip
   - pip:
       - git+https://github.com/anttonalberdi/microscape.git

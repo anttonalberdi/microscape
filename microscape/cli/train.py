@@ -29,7 +29,10 @@ def train_cmd(
     target_col: str = typer.Option("target", help="Target column."),
     seed: int = typer.Option(42, help="Random seed."),
 ):
-    """Train a hierarchical Bayesian regression with random intercepts for cage and environment."""
+    """
+    Train a hierarchical Bayesian regression with random intercepts for cage and environment,
+    and an optional fixed effect for treatment. Uses PyMC >=5 (pm.Data, no MutableData).
+    """
     outdir = outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -49,7 +52,7 @@ def train_cmd(
     # Drop rows with missing target
     df = df.dropna(subset=[target_col])
 
-    # Prepare design matrices
+    # Design matrices
     X = df[features].copy()
     if "abundance" in X.columns:
         X["abundance"] = np.log1p(X["abundance"].astype(float))
@@ -82,11 +85,12 @@ def train_cmd(
     rng = np.random.default_rng(seed)
 
     with pm.Model() as model:
-        Xd = pm.MutableData("X", X.values)
-        y_obs = pm.MutableData("y", y)
+        # Use pm.Data (MutableData is deprecated)
+        Xd   = pm.Data("X", X.values)
+        y_obs = pm.Data("y", y)
 
         alpha = pm.Normal("alpha", 0.0, 2.0)
-        beta = pm.Normal("beta", 0.0, 1.0, shape=X.shape[1])
+        beta  = pm.Normal("beta", 0.0, 1.0, shape=X.shape[1])
         sigma = pm.HalfNormal("sigma", 1.0)
 
         mu = alpha + pm.math.dot(Xd, beta)
@@ -94,25 +98,26 @@ def train_cmd(
         if cage_idx is not None:
             sigma_cage = pm.HalfNormal("sigma_cage", 1.0)
             a_cage = pm.Normal("a_cage", 0.0, sigma_cage, shape=len(cage_map))
-            cage_d = pm.MutableData("cage_idx", cage_idx)
+            cage_d = pm.Data("cage_idx", cage_idx)
             mu = mu + a_cage[cage_d]
 
         if env_idx is not None:
             sigma_env = pm.HalfNormal("sigma_env", 1.0)
             a_env = pm.Normal("a_env", 0.0, sigma_env, shape=len(env_map))
-            env_d = pm.MutableData("env_idx", env_idx)
+            env_d = pm.Data("env_idx", env_idx)
             mu = mu + a_env[env_d]
 
         if treat_code is not None:
             k = len(treat_map)
             gamma_t = pm.Normal("gamma_t", 0.0, 1.0, shape=k)
-            tr_d = pm.MutableData("treat_idx", treat_code)
+            tr_d = pm.Data("treat_idx", treat_code)
             mu = mu + gamma_t[tr_d]
 
         y_like = pm.Normal("y_like", mu, sigma, observed=y_obs)
 
-        idata = pm.sample(draws=draws, tune=tune, chains=chains, random_seed=seed, target_accept=0.9)
-        ppc = pm.sample_posterior_predictive(idata, var_names=["y_like"])
+        idata = pm.sample(draws=draws, tune=tune, chains=chains,
+                          random_seed=seed, target_accept=0.9)
+        _ = pm.sample_posterior_predictive(idata, var_names=["y_like"])
 
     az_path = outdir / "posterior.nc"
     idata.to_netcdf(az_path)
