@@ -14,11 +14,7 @@ metabolism:
     C0008: EX_C0008_e
     C0009: EX_C0009_e
     C0010: EX_C0010_e
-    C0011: EX_C0011_e
-    C0012: EX_C0012_e
-    C0013: EX_C0013_e
-    C0014: EX_C0014_e
-    
+
   uptake:
     mode: linear_clip          # linear_clip | linear | cap_only
     mM_per_uptake: 1.0

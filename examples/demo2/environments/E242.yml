@@ -1,0 +1,61 @@
+environment:
+  id: E242
+  label: Env_E242
+  factors:
+    treatment: diet_B
+    timepoint: T1
+  blocking:
+    pen: cage2
+  covariates:
+    weight: 25.48
+  spots:
+  - id: S0326
+    file: S0326.yml
+  - id: S0327
+    file: S0327.yml
+  - id: S0328
+    file: S0328.yml
+  - id: S0329
+    file: S0329.yml
+  - id: S0330
+    file: S0330.yml
+  - id: S0331
+    file: S0331.yml
+  - id: S0332
+    file: S0332.yml
+  - id: S0333
+    file: S0333.yml
+  - id: S0334
+    file: S0334.yml
+  - id: S0335
+    file: S0335.yml
+  - id: S0336
+    file: S0336.yml
+  - id: S0337
+    file: S0337.yml
+  - id: S0338
+    file: S0338.yml
+  - id: S0339
+    file: S0339.yml
+  - id: S0340
+    file: S0340.yml
+  - id: S0341
+    file: S0341.yml
+  - id: S0342
+    file: S0342.yml
+  - id: S0343
+    file: S0343.yml
+  - id: S0344
+    file: S0344.yml
+  - id: S0345
+    file: S0345.yml
+  - id: S0346
+    file: S0346.yml
+  - id: S0347
+    file: S0347.yml
+  - id: S0348
+    file: S0348.yml
+  - id: S0349
+    file: S0349.yml
+  - id: S0350
+    file: S0350.yml

@@ -1,67 +1,89 @@
-# system.yml - Master file describing the overall experimental design and metadata
 system:
   id: demo
-  description: "Gut microbiome sample from mouse"
-  author: "Antton Alberdi"
-  type: host # host, environment, laboratory
-
-  # Configuration
-
+  description: Gut microbiome sample from mouse
+  author: Antton Alberdi
+  type: host
   config:
     ecology: ecology.yml
     metabolism: metabolism.yml
-
   paths:
     config_dir: config
     environments_dir: environments
     spots_dir: spots
     microbes_dir: microbes
-
-  #Experimental design
-
   design:
     factors:
-      treatment: ["diet_A", "diet_B"]
-      timepoint: ["T1", "T2"]
+      treatment:
+      - diet_A
+      - diet_B
+      timepoint:
+      - T1
     blocking:
-      block: ["cage1", "cage2"]
-
-  # Global registries for environments, microbes, and metabolites
+      block:
+      - cage1
+      - cage2
   registry:
     environments:
-      - id: E001
-        file: E001.yml
-      - id: E002
-        file: E002.yml
+    - id: E101
+      file: E101.yml
+    - id: E102
+      file: E102.yml
+    - id: E103
+      file: E103.yml
+    - id: E104
+      file: E104.yml
+    - id: E141
+      file: E141.yml
+    - id: E142
+      file: E142.yml
+    - id: E143
+      file: E143.yml
+    - id: E144
+      file: E144.yml
+    - id: E201
+      file: E201.yml
+    - id: E202
+      file: E202.yml
+    - id: E203
+      file: E203.yml
+    - id: E204
+      file: E204.yml
+    - id: E241
+      file: E241.yml
+    - id: E242
+      file: E242.yml
+    - id: E243
+      file: E243.yml
+    - id: E244
+      file: E244.yml
     microbes:
-      - id: M0001
-        file: M0001.yml
-      - id: M0002
-        file: M0002.yml
-      - id: M0003
-        file: M0003.yml
-      - id: M0004
-        file: M0004.yml
-      - id: M0005
-        file: M0005.yml
-      - id: M0006
-        file: M0006.yml
-      - id: M0007
-        file: M0007.yml
-      - id: M0008
-        file: M0008.yml
-      - id: M0009
-        file: M0009.yml
-      - id: M0010
-        file: M0010.yml
-      - id: M0011
-        file: M0011.yml
-      - id: M0012
-        file: M0012.yml
-      - id: M0013
-        file: M0013.yml
-      - id: M0014
-        file: M0014.yml
-      - id: M0015
-        file: M0015.yml
-
+    - id: M0001
+      file: M0001.yml
+    - id: M0002
+      file: M0002.yml
+    - id: M0003
+      file: M0003.yml
+    - id: M0004
+      file: M0004.yml
+    - id: M0005
+      file: M0005.yml
+    - id: M0006
+      file: M0006.yml
+    - id: M0007
+      file: M0007.yml
+    - id: M0008
+      file: M0008.yml
+    - id: M0009
+      file: M0009.yml
+    - id: M0010
+      file: M0010.yml
+    - id: M0011
+      file: M0011.yml
+    - id: M0012
+      file: M0012.yml
+    - id: M0013
+      file: M0013.yml
+    - id: M0014
+      file: M0014.yml
+    - id: M0015
+      file: M0015.yml

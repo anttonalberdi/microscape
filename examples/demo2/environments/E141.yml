@@ -1,0 +1,61 @@
+environment:
+  id: E141
+  label: Env_E141
+  factors:
+    treatment: diet_A
+    timepoint: T1
+  blocking:
+    pen: cage2
+  covariates:
+    weight: 21.26
+  spots:
+  - id: S0101
+    file: S0101.yml
+  - id: S0102
+    file: S0102.yml
+  - id: S0103
+    file: S0103.yml
+  - id: S0104
+    file: S0104.yml
+  - id: S0105
+    file: S0105.yml
+  - id: S0106
+    file: S0106.yml
+  - id: S0107
+    file: S0107.yml
+  - id: S0108
+    file: S0108.yml
+  - id: S0109
+    file: S0109.yml
+  - id: S0110
+    file: S0110.yml
+  - id: S0111
+    file: S0111.yml
+  - id: S0112
+    file: S0112.yml
+  - id: S0113
+    file: S0113.yml
+  - id: S0114
+    file: S0114.yml
+  - id: S0115
+    file: S0115.yml
+  - id: S0116
+    file: S0116.yml
+  - id: S0117
+    file: S0117.yml
+  - id: S0118
+    file: S0118.yml
+  - id: S0119
+    file: S0119.yml
+  - id: S0120
+    file: S0120.yml
+  - id: S0121
+    file: S0121.yml
+  - id: S0122
+    file: S0122.yml
+  - id: S0123
+    file: S0123.yml
+  - id: S0124
+    file: S0124.yml
+  - id: S0125
+    file: S0125.yml
