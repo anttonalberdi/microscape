@@ -233,6 +233,139 @@ microscape community test/metabolism_unconstrained.json --outdir test
 
 ---
 
+
+### 6) `build` — assemble the modeling table
+
+**What it does.** Joins per‑spot features with per‑microbe targets from a chosen metabolism JSON. Each **row = (spot, microbe)**.
+
+**Standard use:**
+```bash
+# Predict growth (objective)
+microscape build demo/system.yml   --metabolism-json test/metabolism_constrained_combined.json   --outdir out/model --target objective
+
+# Or: predict a flux (e.g., uptake/secretion of C0011)
+microscape build demo/system.yml   --metabolism-json test/metabolism_constrained_combined.json   --outdir out/model_flux --target flux:EX_C0011_e
+```
+
+**Also supported.**
+- Multiple targets with combination (e.g., total uptake across metabolites):
+  ```bash
+  microscape build demo/system.yml     --metabolism-json test/metabolism_constrained_combined.json     --outdir out/model_multi     --target flux:EX_C0011_e --target flux:EX_C0012_e     --target-op uptake_sum
+  ```
+- Progress bar: `--no-progress` to disable.
+
+**Outputs (in `--outdir`):**
+- `table.csv` — tidy dataset for training (columns include `spot_id`, `microbe`, `treatment`, `cage`, `env_id`, `abundance`, `met:*`, and a single `target`).
+- `schema.json` — provenance + column types.
+
+---
+
+### 7) `train` — fit a hierarchical Bayesian model
+
+**What it does.** Learns a regression with:
+- fixed effects for **features** (standardized; `abundance` is `log1p` before z‑scoring),
+- optional fixed effect for **treatment**,
+- random intercepts for **cage** and **environment**.
+
+**Standard use:**
+```bash
+microscape train out/model/table.csv --outdir out/model_run
+```
+
+**Scaling & robustness options (recommended for large data):**
+```bash
+# fewer processes (avoid OOM), gentle init, light shrinkage on betas
+microscape train out/model/table.csv --outdir out/model_run   --cores 1 --init adapt_diag --target-accept 0.9 --shrinkage
+# or use NumPyro NUTS (single process) if JAX is available
+microscape train out/model/table.csv --outdir out/model_run --jax
+```
+
+**Outputs (in `--outdir`):**
+- `posterior.nc` — posterior draws (ArviZ NetCDF).
+- `model_card.json` — features used, group encodings, training stats (means/SDs), and a summary table.
+
+---
+
+### 8) `evaluate` — check fit and interpret coefficients
+
+**What it does.** Uses the saved posterior + the training table to compute:
+- per‑row **posterior means/HDIs** and **residuals**,
+- **RMSE/MAE/R²** and HDI coverage; WAIC/LOO when available,
+- summaries of **β coefficients**, **treatment effects**, and **random intercepts**.
+
+**Standard use:**
+```bash
+microscape evaluate out/model/table.csv out/model_run/posterior.nc out/model_run/model_card.json   --outdir out/eval
+```
+
+**Outputs (in `--outdir`):**
+- `residuals.csv` — observed vs. predicted (+ HDIs) per row.
+- `coef_summary.csv` — α and βs with mean/SD/HDIs and Pr(>0)/Pr(<0).
+- `treatment_effects.csv` — per‑level fixed effects (if modeled).
+- `random_intercepts_cage.csv`, `random_intercepts_env.csv` — RE summaries (if modeled).
+- `metrics.json` — RMSE/MAE/R²/coverage (+ WAIC/LOO if available).
+
+---
+
+### 9) `predict` — posterior predictions on any table
+
+**What it does.** Produces posterior **conditional means** and **HDIs** for new rows (or the training rows), reusing training standardization and encodings from the model card.
+
+**Standard use (in‑sample):**
+```bash
+microscape predict out/model_run/posterior.nc out/model_run/model_card.json   --outdir out/pred
+```
+
+**Predict on new data:**
+```bash
+microscape predict out/model_run/posterior.nc out/model_run/model_card.json   --table out/model_new/table.csv   --outdir out/pred_new
+```
+
+**Notes.**
+- Unknown group levels default to **zero random effect**; switch to strict with `--new-level-policy error`.
+- Add predictive intervals (noise via `sigma`) with `--ppc`.
+
+**Outputs (in `--outdir`):**
+- `predictions.csv` — `y_hat_mean` + HDIs (and, with `--ppc`, predictive intervals).
+- `predict_meta.json` — run configuration and feature list.
+
+---
+
+
+### 10) `microscape whatif` — counterfactual scenarios
+
+**What it does.** Creates *what-if* versions of selected rows (spot–microbe pairs), applies edits to features and/or group labels, and returns posterior **means** and **HDIs** for **baseline**, **what‑if**, and their **delta** — without re‑running metabolism.
+
+**Standard uses:**
+```bash
+# Change one metabolite for a specific spot & microbe
+microscape whatif out/model_run/posterior.nc out/model_run/model_card.json   --select "spot_id=S0001" --select "microbe=M0002"   --set "met:C0010=8.0"   --outdir out/whatif_S1_M2
+
+# "Remove" a microbe everywhere (set its abundance to 0 for all matching rows)
+microscape whatif out/model_run/posterior.nc out/model_run/model_card.json   --select "microbe=M0004"   --set "abundance=0"   --limit 1000000   --outdir out/whatif_drop_M0004
+
+# Zero a metabolite across all rows (global intervention)
+microscape whatif out/model_run/posterior.nc out/model_run/model_card.json   --set "met:C0011=0"   --limit 1000000   --outdir out/whatif_zero_metC0011_all
+
+# Apply changes only within a treatment group
+microscape whatif out/model_run/posterior.nc out/model_run/model_card.json   --select "treatment=diet_B"   --set "met:C0011=0"   --outdir out/whatif_zero_metC0011_dietB
+```
+
+**Arguments you’ll care about.**
+- `--set col=value` overwrites a column (e.g., `met:C0010=8.0`, `treatment=diet_B`).
+- `--delta col=+/-x` adds a numeric delta (e.g., `abundance=+10`, `met:C0004=-1.5`).
+- `--select col=value` filters rows; repeat to AND conditions.
+- `--limit` caps how many rows are processed (default **50**). Use a large value (e.g., `--limit 1000000`) for global edits.
+- `--new-level-policy zero|error` controls unseen group levels (default **zero** → no random effect).
+
+**Outputs (in `--outdir`):**
+- `whatif.csv` — baseline vs. what‑if (`y_base_mean/HDI`, `y_new_mean/HDI`) and `delta_mean/HDI` per row; includes before/after values for changed columns.
+- `whatif_meta.json` — run configuration and feature list.
+
+> Note: *what-if* operates on the **trained model** (counterfactual prediction). To recompute mechanistic steady states under removals/edits, change inputs and re‑run `microscape metabolism` (and downstream modules).
+
+---
+
 ## 🧪 Practical tips
 - **Compare runs.** Run `metabolism` once without constraints and once with; diff objectives and key `flux:EX_*` columns to see how constraints reshape phenotype.
 - **Audit quickly.** If something looks off for a pair, open the matching `constraints__*__debug.json` to see exactly how its bounds were computed.
