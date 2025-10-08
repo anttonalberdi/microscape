@@ -31,7 +31,7 @@ def _compute_feature_stats(X: pd.DataFrame) -> Tuple[Dict[str, float], Dict[str,
 def _validate_numeric(df: pd.DataFrame, cols: List[str], where: str = "features"):
     bad_cols = [c for c in cols if not np.issubdtype(df[c].dtype, np.number)]
     if bad_cols:
-        raise typer.BadParameter(f"Non-numeric {where}: {bad_cols}. Cast them to numeric before training.")
+        raise typer.BadParameter(f"Non-numeric {where}: {bad_cols}. Cast to numeric before training.")
     vals = df[cols].to_numpy()
     if not np.isfinite(vals).all():
         rows, cols_idx = np.where(~np.isfinite(vals))
@@ -57,28 +57,27 @@ def train_cmd(
     ),
     drop_constant: bool = typer.Option(
         True, "--drop-constant/--keep-constant",
-        help="Drop features with zero variance (recommended for stability)."
+        help="Drop features with zero variance (recommended)."
     ),
     group_cage: str = typer.Option("cage", help="Random-intercept group column for cages (can be missing)."),
     group_env: str = typer.Option("env_id", help="Random-intercept group column for environments (can be missing)."),
     fixed_treatment: str = typer.Option("treatment", help="Fixed-effect column for treatment (optional)."),
     draws: int = typer.Option(1000, help="Posterior draws."),
-    tune: int = typer.Option(1000, help="Tuning steps."),
+    tune: int = typer.Option(1000, help="Tuning (warmup) steps."),
     chains: int = typer.Option(4, help="MCMC chains."),
-    cores: int = typer.Option(1, help="CPU cores for sampling (set 1 to reduce memory)."),
-    init: str = typer.Option("adapt_diag", help="Init method: adapt_diag|jitter+adapt_diag|auto"),
+    cores: int = typer.Option(1, help="CPU cores (set 1 to reduce memory)."),
+    init: str = typer.Option("adapt_diag", help="Init: adapt_diag|jitter+adapt_diag|auto"),
     target_accept: float = typer.Option(0.9, help="NUTS target_accept (0.8–0.99)."),
-    max_treedepth: int = typer.Option(12, help="Max tree depth for NUTS."),
-    jax: bool = typer.Option(False, help="Use NumPyro NUTS via JAX (if installed) instead of PyMC sampler."),
-    shrinkage: bool = typer.Option(False, help="Use hierarchical shrinkage prior on betas (HalfNormal global tau)."),
-    student_t: bool = typer.Option(False, help="Use Student-T likelihood instead of Normal (robust to outliers)."),
+    # max_treedepth intentionally omitted from pm.sample to avoid step_kwargs issues
+    jax: bool = typer.Option(False, help="Use NumPyro NUTS via JAX (if installed)."),
+    shrinkage: bool = typer.Option(False, help="Hierarchical shrinkage on betas (global HalfNormal tau)."),
+    student_t: bool = typer.Option(False, help="Student-T likelihood (robust to outliers)."),
     target_col: str = typer.Option("target", help="Target column."),
     seed: int = typer.Option(42, help="Random seed."),
 ):
     """
     Train a hierarchical Bayesian regression with random intercepts for cage and environment,
-    and an optional fixed effect for treatment. Adds: input validation, cores/init/target_accept controls,
-    optional JAX/NumPyro sampler, shrinkage prior, and Student-T likelihood.
+    and an optional fixed effect for treatment. Robust validation + flexible sampling options.
     """
     outdir = outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
@@ -88,7 +87,6 @@ def train_cmd(
         df = pd.read_parquet(table)
     else:
         df = pd.read_csv(table)
-
     if df.empty:
         raise typer.BadParameter("Input table is empty.")
 
@@ -98,32 +96,34 @@ def train_cmd(
         if "abundance" in df.columns:
             features.append("abundance")
         features += [c for c in df.columns if c.startswith("met:")]
-    # Deduplicate while preserving order
+    # dedupe keep order
     seen = set()
     features = [c for c in features if not (c in seen or seen.add(c))]
 
-    # Validate presence
+    # Validate columns
     missing = [c for c in features if c not in df.columns]
     if missing:
-        raise typer.BadParameter(f"Requested feature(s) not found in table: {missing}")
-
+        raise typer.BadParameter(f"Requested feature(s) not found: {missing}")
     if target_col not in df.columns:
-        raise typer.BadParameter(f"Target column '{target_col}' not found in table.")
+        raise typer.BadParameter(f"Target column '{target_col}' not found.")
 
     # Drop rows with missing target
     df = df.dropna(subset=[target_col])
     if df.empty:
         raise typer.BadParameter("After dropping rows with missing target, no data remain.")
 
-    # Build design X (apply same transform as train previously: log1p for abundance)
+    # Build design X (log1p on abundance)
     X_raw = df[features].copy()
     if "abundance" in X_raw.columns:
+        # guard: abundance must be >= -1 for log1p
+        if (X_raw["abundance"] < -1).any():
+            badn = int((X_raw["abundance"] < -1).sum())
+            raise typer.BadParameter(f"'abundance' has {badn} values < -1; log1p is undefined there.")
         X_raw["abundance"] = np.log1p(X_raw["abundance"].astype(float))
 
-    # Drop constant features if requested
+    # Drop constant features
     if drop_constant:
-        keep = []
-        dropped = []
+        keep, dropped = [], []
         for c in X_raw.columns:
             v = X_raw[c].to_numpy()
             if np.nanstd(v, ddof=0) == 0:
@@ -137,17 +137,17 @@ def train_cmd(
         if not features:
             raise typer.BadParameter("All features were constant; nothing to model.")
 
-    # Validate numeric and finite BEFORE computing stats
+    # Validate numeric/finite before standardization
     _validate_numeric(X_raw, list(X_raw.columns), where="features (after log1p)")
     y = df[target_col].astype(float).values
     if not np.isfinite(y).all():
         raise typer.BadParameter("Non-finite values in target after casting to float.")
 
-    # Standardization stats (save for predict reproducibility)
+    # Standardize (save means/sds)
     means, sds = _compute_feature_stats(X_raw)
     X = _standardize_with_stats(X_raw, means, sds)
 
-    # Encodings for random/fixed factors
+    # Encodings
     cage_idx, cage_map = (None, {})
     if group_cage in df.columns:
         cage_idx, cage_map = _code_cat(df[group_cage])
@@ -169,8 +169,8 @@ def train_cmd(
     rng = np.random.default_rng(seed)
 
     with pm.Model() as model:
-        # Data containers (pm.Data is mutable in PyMC>=5)
-        Xd = pm.Data("X", X.values.astype("float64"))   # use float64 to match default PyMC/aesara floatX
+        # pm.Data (MutableData deprecated)
+        Xd = pm.Data("X", X.values.astype("float64"))
         y_obs = pm.Data("y", y.astype("float64"))
 
         # Priors
@@ -204,7 +204,7 @@ def train_cmd(
 
         # Likelihood
         if student_t:
-            nu = pm.Exponential("nu", 1/30)  # weakly informative heavy tails
+            nu = pm.Exponential("nu", 1/30)  # weakly informative
             sigma = pm.HalfNormal("sigma", 1.0)
             y_like = pm.StudentT("y_like", nu=pm.math.softplus(nu)+1.0, mu=mu, sigma=sigma, observed=y_obs)
         else:
@@ -223,11 +223,11 @@ def train_cmd(
                 chain_method="vectorized"
             )
         else:
-            step = pm.NUTS(max_treedepth=max_treedepth)
+            # Let pm.sample configure NUTS; avoid passing a Step object to keep compatibility
             idata = pm.sample(
                 draws=draws, tune=tune, chains=chains,
                 cores=max(1, cores), init=init, target_accept=target_accept,
-                random_seed=seed, step=step
+                random_seed=seed
             )
             _ = pm.sample_posterior_predictive(idata, var_names=["y_like"])
 
@@ -235,7 +235,7 @@ def train_cmd(
     az_path = outdir / "posterior.nc"
     idata.to_netcdf(az_path)
 
-    # Model card (add feature stats + options for reproducibility)
+    # Model card (add feature stats + options)
     card = {
         "created_utc": __import__("datetime").datetime.utcnow().isoformat(),
         "table": str(table),
@@ -256,7 +256,6 @@ def train_cmd(
         "cores": max(1, cores),
         "init": init,
         "target_accept": target_accept,
-        "max_treedepth": max_treedepth,
         "jax": bool(jax),
         "shrinkage": bool(shrinkage),
         "student_t": bool(student_t),
@@ -265,8 +264,7 @@ def train_cmd(
 
     try:
         import arviz as az
-        summary = az.summary(idata)
-        card["summary"] = summary.to_dict(orient="index")
+        card["summary"] = az.summary(idata).to_dict(orient="index")
     except Exception:
         pass
 
