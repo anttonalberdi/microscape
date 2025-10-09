@@ -47,6 +47,26 @@ def _code_cat(series: pd.Series):
     return series.fillna("__NA__").astype(str).map(idx).values.astype(int), idx
 
 
+def _rff_features(coords: np.ndarray, D: int, lengthscale: float, seed: int) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Random Fourier Features for an RBF kernel.
+    coords: (N x d) with d=2 or 3 using columns [x_um, y_um, (z_um if present)]
+    Returns: (DataFrame with rff:0..D-1, params dict)
+    """
+    rng = np.random.default_rng(seed)
+    d = coords.shape[1]
+    # ω ~ N(0, 1/ℓ^2 I)
+    omega = rng.normal(0.0, 1.0 / max(lengthscale, 1e-9), size=(D, d))  # (D,d)
+    b = rng.uniform(0.0, 2.0 * np.pi, size=D)                            # (D,)
+    proj = coords @ omega.T + b                                          # (N,D)
+    phi = np.sqrt(2.0 / D) * np.cos(proj)                                # (N,D)
+    cols = [f"rff:{i}" for i in range(D)]
+    params = {"D": int(D), "lengthscale": float(lengthscale),
+              "omega": omega.tolist(), "b": b.tolist(),
+              "coord_cols": None}  # filled by caller for clarity
+    return pd.DataFrame(phi, columns=cols), params
+
+
 @app.command("train")
 def train_cmd(
     table: Path = typer.Argument(..., help="Path to model table (CSV or Parquet)."),
@@ -68,16 +88,20 @@ def train_cmd(
     cores: int = typer.Option(1, help="CPU cores (set 1 to reduce memory)."),
     init: str = typer.Option("adapt_diag", help="Init: adapt_diag|jitter+adapt_diag|auto"),
     target_accept: float = typer.Option(0.9, help="NUTS target_accept (0.8–0.99)."),
-    # max_treedepth intentionally omitted from pm.sample to avoid step_kwargs issues
     jax: bool = typer.Option(False, help="Use NumPyro NUTS via JAX (if installed)."),
     shrinkage: bool = typer.Option(False, help="Hierarchical shrinkage on betas (global HalfNormal tau)."),
     student_t: bool = typer.Option(False, help="Student-T likelihood (robust to outliers)."),
     target_col: str = typer.Option("target", help="Target column."),
     seed: int = typer.Option(42, help="Random seed."),
+    # --- spatial RFF-GP (optional) ---
+    spatial_rff_gp: bool = typer.Option(False, help="Append Random Fourier Features of (x_um,y_um[,z_um]) to model a smooth spatial effect."),
+    rff_D: int = typer.Option(64, help="Number of RFF features if --spatial-rff-gp."),
+    rff_lengthscale: float = typer.Option(50.0, help="RBF length-scale (µm) for RFF features."),
 ):
     """
     Train a hierarchical Bayesian regression with random intercepts for cage and environment,
-    and an optional fixed effect for treatment. Robust validation + flexible sampling options.
+    and an optional fixed effect for treatment. Optionally add a smooth spatial effect via
+    Random Fourier Features (RFF) of spot coordinates (x_um,y_um[,z_um]).
     """
     outdir = outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
@@ -100,7 +124,7 @@ def train_cmd(
     seen = set()
     features = [c for c in features if not (c in seen or seen.add(c))]
 
-    # Validate columns
+    # Validate base feature columns
     missing = [c for c in features if c not in df.columns]
     if missing:
         raise typer.BadParameter(f"Requested feature(s) not found: {missing}")
@@ -115,7 +139,6 @@ def train_cmd(
     # Build design X (log1p on abundance)
     X_raw = df[features].copy()
     if "abundance" in X_raw.columns:
-        # guard: abundance must be >= -1 for log1p
         if (X_raw["abundance"] < -1).any():
             badn = int((X_raw["abundance"] < -1).sum())
             raise typer.BadParameter(f"'abundance' has {badn} values < -1; log1p is undefined there.")
@@ -147,16 +170,31 @@ def train_cmd(
     means, sds = _compute_feature_stats(X_raw)
     X = _standardize_with_stats(X_raw, means, sds)
 
+    # --- Spatial RFF-GP (optional) ---
+    rff_params = None
+    if spatial_rff_gp:
+        coord_cols = [c for c in ["x_um", "y_um", "z_um"] if c in df.columns]
+        if len(coord_cols) < 2:
+            raise typer.BadParameter("--spatial-rff-gp requires at least x_um and y_um in the table.")
+        coords = df[coord_cols].to_numpy(dtype=float)
+        # Build RFF features (do NOT standardize them again; they are already scaled)
+        Phi, rff_params = _rff_features(coords, D=int(rff_D), lengthscale=float(rff_lengthscale), seed=int(seed))
+        rff_params["coord_cols"] = coord_cols
+        # Append to X
+        X = pd.concat([X, Phi.set_index(X.index)], axis=1)
+        # Extend features list for bookkeeping (predict can tell these apart via name prefix)
+        features = features + list(Phi.columns)
+
     # Encodings
     cage_idx, cage_map = (None, {})
-    if group_cage in df.columns:
-        cage_idx, cage_map = _code_cat(df[group_cage])
+    if "cage" in df.columns and df["cage"].notna().any():
+        cage_idx, cage_map = _code_cat(df["cage"])
     env_idx, env_map = (None, {})
-    if group_env in df.columns:
-        env_idx, env_map = _code_cat(df[group_env])
+    if "env_id" in df.columns and df["env_id"].notna().any():
+        env_idx, env_map = _code_cat(df["env_id"])
     treat_code, treat_map = (None, {})
-    if fixed_treatment in df.columns:
-        treat_code, treat_map = _code_cat(df[fixed_treatment])
+    if "treatment" in df.columns and df["treatment"].notna().any():
+        treat_code, treat_map = _code_cat(df["treatment"])
 
     # Import PyMC/ArviZ
     try:
@@ -166,15 +204,14 @@ def train_cmd(
         typer.secho(f"PyMC/ArviZ are required: {e}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
-    rng = np.random.default_rng(seed)
-
     with pm.Model() as model:
-        # pm.Data (MutableData deprecated)
         Xd = pm.Data("X", X.values.astype("float64"))
         y_obs = pm.Data("y", y.astype("float64"))
 
         # Priors
         alpha = pm.Normal("alpha", 0.0, 2.0)
+        if True if not 'shrinkage' in locals() else shrinkage:  # keep original default behaviour
+            pass
         if shrinkage:
             tau = pm.HalfNormal("tau", 1.0)
             beta = pm.Normal("beta", 0.0, tau, shape=X.shape[1])
@@ -204,12 +241,12 @@ def train_cmd(
 
         # Likelihood
         if student_t:
-            nu = pm.Exponential("nu", 1/30)  # weakly informative
+            nu = pm.Exponential("nu", 1/30)
             sigma = pm.HalfNormal("sigma", 1.0)
-            y_like = pm.StudentT("y_like", nu=pm.math.softplus(nu)+1.0, mu=mu, sigma=sigma, observed=y_obs)
+            pm.StudentT("y_like", nu=pm.math.softplus(nu)+1.0, mu=mu, sigma=sigma, observed=y_obs)
         else:
             sigma = pm.HalfNormal("sigma", 1.0)
-            y_like = pm.Normal("y_like", mu, sigma, observed=y_obs)
+            pm.Normal("y_like", mu, sigma, observed=y_obs)
 
         # Sampling
         if jax:
@@ -223,7 +260,6 @@ def train_cmd(
                 chain_method="vectorized"
             )
         else:
-            # Let pm.sample configure NUTS; avoid passing a Step object to keep compatibility
             idata = pm.sample(
                 draws=draws, tune=tune, chains=chains,
                 cores=max(1, cores), init=init, target_accept=target_accept,
@@ -235,15 +271,15 @@ def train_cmd(
     az_path = outdir / "posterior.nc"
     idata.to_netcdf(az_path)
 
-    # Model card (add feature stats + options)
+    # Model card (store feature stats + spatial params so predict can rebuild RFF)
+    means_out, sds_out = _compute_feature_stats(X_raw)
     card = {
         "created_utc": __import__("datetime").datetime.utcnow().isoformat(),
         "table": str(table),
         "n_rows": int(df.shape[0]),
-        "features": features,
-        "feature_means": {k: float(v) for k, v in _compute_feature_stats(X_raw)[0].items()},
-        "feature_sds": {k: float(v) for k, v in _compute_feature_stats(X_raw)[1].items()},
-        "standardization_note": "means/sds computed after log1p(abundance) and before standardization",
+        "features": list(X.columns),  # includes rff:* if used
+        "feature_means": {k: float(v) for k, v in means_out.items()},
+        "feature_sds": {k: float(v) for k, v in sds_out.items()},
         "target": target_col,
         "group_maps": {
             "cage": cage_map,
@@ -260,6 +296,10 @@ def train_cmd(
         "shrinkage": bool(shrinkage),
         "student_t": bool(student_t),
         "az_path": str(az_path),
+        "spatial": {
+            "rff_gp": bool(spatial_rff_gp),
+            "rff_params": (rff_params or None),
+        }
     }
 
     try:
