@@ -75,10 +75,6 @@ def _coef_summary(arr: np.ndarray, names: List[str], hdi_prob: float = 0.95) -> 
 # ------------- RFF helpers -------------
 
 def _rff_apply(coords: np.ndarray, params: Dict[str, Any]) -> pd.DataFrame:
-    """
-    Recreate RFF features from saved parameters (omega, b, D).
-    coords: (N, d) with columns in the same order used during training.
-    """
     D = int(params["D"])
     omega = np.array(params["omega"], dtype=float)  # (D, d)
     b = np.array(params["b"], dtype=float)          # (D,)
@@ -98,13 +94,6 @@ def _prepare_design_with_spatial(
     feature_sds: Dict[str, float],
     spatial_card: Dict[str, Any],
 ) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray, List[str]]:
-    """
-    Rebuild the design matrix X in the SAME column order used by training:
-      - standardize base features using saved (means, sds)
-      - recreate RFF features (if used) from saved params and append in place
-    Returns:
-      df (original rows), X (N,K), y (N,), meta_cols (for reporting)
-    """
     if table.suffix.lower() == ".parquet":
         df = pd.read_parquet(table)
     else:
