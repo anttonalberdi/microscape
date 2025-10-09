@@ -24,6 +24,8 @@ from ..io.spot_loader import load_spot
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 
+# ----------------------------- helpers -----------------------------
+
 def _flatten_features_from_spot(
     spot: Dict[str, Any],
     microbe_id: str,
@@ -67,31 +69,69 @@ def _read_metabolism_json(path: Path) -> Dict[str, Any]:
         raise typer.BadParameter(f"Cannot read metabolism JSON at {path}: {e}")
 
 
-def _index_metabolism_by_spot(meta: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def _index_metabolism_by_spot(meta: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Build two indices:
-      - by key:      per_spot[k]
-      - by 'spot_id' per_spot_by_sid[ node['spot_id'] or k ]
-    Accepts two shapes:
+    Return a dict mapping spot_id-like keys to node dicts with at least {"microbes": {...}}.
+    Accepts:
       A) { "S0001": {"microbes": {...}}, ... }
       B) { "spots": { "S0001": {"microbes": {...}}, ... } }
     """
-    if "spots" in meta and isinstance(meta["spots"], dict):
-        base = {sid: {"microbes": (node or {}).get("microbes", {})} for sid, node in meta["spots"].items()}
-    else:
-        base = meta
-
+    base = meta.get("spots") if isinstance(meta, dict) and "spots" in meta else meta
     per_spot: Dict[str, Any] = {}
     for k, node in (base or {}).items():
-        if isinstance(node, dict):
-            per_spot[str(k)] = node
+        if not isinstance(node, dict):
+            continue
+        # normalize
+        microbes = (node.get("microbes") or {})
+        sid = str(node.get("spot_id") or k)
+        per_spot[str(k)] = {"spot_id": sid, "microbes": microbes}
+        # also index by explicit spot_id if provided
+        per_spot.setdefault(sid, {"spot_id": sid, "microbes": microbes})
+    return per_spot
 
-    per_spot_by_sid: Dict[str, Any] = {}
-    for k, node in per_spot.items():
-        sid2 = str((node or {}).get("spot_id") or k)
-        per_spot_by_sid[sid2] = node
 
-    return per_spot, per_spot_by_sid
+def _spot_join_keys(spot_obj: Dict[str, Any], sid_from_path: str) -> List[str]:
+    """
+    Build a list of plausible keys to join metabolism JSON by spot.
+    Order matters (first hit wins).
+    """
+    s = spot_obj.get("spot") or spot_obj
+    keys: List[str] = []
+    # explicit IDs first
+    for k in ("id", "name", "spot_id"):
+        v = s.get(k)
+        if v is not None:
+            keys.append(str(v))
+    # path stem (S0001)
+    keys.append(str(sid_from_path))
+    # tolerant variants (strip leading zeros)
+    try:
+        if sid_from_path.lstrip("S").isdigit():
+            n = sid_from_path.lstrip("S")
+            keys.append(n)
+    except Exception:
+        pass
+    # unique-ify preserving order
+    out: List[str] = []
+    seen = set()
+    for k in keys:
+        if k not in seen:
+            out.append(k); seen.add(k)
+    return out
+
+
+def _count_spots(env_files: List[str]) -> Optional[int]:
+    """Best-effort count of total spots across environment YAMLs (for progress bar total)."""
+    total = 0
+    try:
+        for env_file in env_files:
+            env_doc = yaml.safe_load(Path(env_file).read_text())
+            env = env_doc.get("environment", {})
+            spots = env.get("spots") or []
+            total += len(spots)
+        return total
+    except Exception:
+        return None
 
 
 def _extract_single_target(mrec: Dict[str, Any], token: str) -> Optional[float]:
@@ -119,21 +159,10 @@ def _extract_single_target(mrec: Dict[str, Any], token: str) -> Optional[float]:
     return None
 
 
-def _combine_targets(values: List[float], op: str, require_all: bool) -> Optional[float]:
+def _combine_targets(values: List[Optional[float]], op: str, require_all: bool) -> Optional[float]:
     """
     Combine multiple target values with the chosen operator.
     values may include None if some targets are missing.
-
-    op:
-      - identity       -> requires exactly one value
-      - sum            -> sum of available values
-      - mean           -> mean of available values
-      - uptake_sum     -> sum(-v for v<0), i.e., total uptake magnitude (positive)
-      - secretion_sum  -> sum(v for v>0), i.e., total secretion (positive)
-      - net            -> sum(values), signed
-
-    If require_all=True and any value is None -> return None.
-    Otherwise, ignore Nones (if all None -> None).
     """
     if require_all and any(v is None for v in values):
         return None
@@ -142,7 +171,7 @@ def _combine_targets(values: List[float], op: str, require_all: bool) -> Optiona
     if not vs:
         return None
 
-    op = op.lower()
+    op = (op or "identity").lower()
     if op == "identity":
         return vs[0] if len(vs) == 1 else None
     if op == "sum":
@@ -159,19 +188,7 @@ def _combine_targets(values: List[float], op: str, require_all: bool) -> Optiona
     return vs[0] if len(vs) == 1 else None
 
 
-def _count_spots(env_files: List[str]) -> Optional[int]:
-    """Best-effort count of total spots across environment YAMLs (for progress bar total)."""
-    total = 0
-    try:
-        for env_file in env_files:
-            env_doc = yaml.safe_load(Path(env_file).read_text())
-            env = env_doc.get("environment", {})
-            spots = env.get("spots") or []
-            total += len(spots)
-        return total
-    except Exception:
-        return None
-
+# ----------------------------- CLI -----------------------------
 
 @app.command("build")
 def build_cmd(
@@ -193,6 +210,9 @@ def build_cmd(
     include_transcripts_sum: bool = typer.Option(False, help="Include simple transcripts sum per microbe."),
     csv_only: bool = typer.Option(False, help="Write CSV only (skip Parquet)."),
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show a progress bar while reading spots."),
+    # New: control how we match spot IDs between system/spot files and metabolism JSON
+    spot_join: str = typer.Option("auto", help="How to join spots to metabolism JSON: auto|id|name|stem"),
+    debug_missing: bool = typer.Option(False, help="Write a CSV of spots/microbes missing targets."),
 ):
     """
     Build a tidy (spot, microbe) table for modeling by joining spot features
@@ -209,9 +229,10 @@ def build_cmd(
 
     # Load metabolism JSON and index by spot
     meta = _read_metabolism_json(metabolism_json)
-    per_spot, per_spot_by_sid = _index_metabolism_by_spot(meta)
+    per_spot = _index_metabolism_by_spot(meta)
 
     rows: List[Dict[str, Any]] = []
+    missing_rows: List[Dict[str, Any]] = []
 
     # Prepare progress bar
     total_spots = _count_spots(env_files)
@@ -238,34 +259,67 @@ def build_cmd(
             for sid, spot_path in iter_spot_files_for_env(env_file, sys_info["paths"]):
                 spot_obj = load_spot(spot_path) or {}
                 spot = spot_obj.get("spot") or spot_obj
-                spot_id = str(spot.get("name") or spot.get("id") or sid)
+                # Build candidate keys for matching to metabolism JSON
+                if spot_join == "auto":
+                    keys = _spot_join_keys(spot_obj, sid)
+                elif spot_join in ("id", "name", "stem"):
+                    if spot_join == "id":
+                        keys = [str((spot.get("id") or ""))]
+                    elif spot_join == "name":
+                        keys = [str((spot.get("name") or ""))]
+                    else:
+                        keys = [str(sid)]
+                else:
+                    raise typer.BadParameter("--spot-join must be one of auto|id|name|stem")
+
+                # first existing key wins
+                rec_spot = None
+                matched_key = None
+                for k in keys:
+                    if k and k in per_spot:
+                        rec_spot = per_spot[k]
+                        matched_key = k
+                        break
 
                 # environment metadata
                 env_meta = {}
                 try:
                     env_doc = yaml.safe_load(Path(env_file).read_text())
-                    env = env_doc.get("environment", {})
-                    env_meta["env_id"] = env.get("id")
-                    env_meta["treatment"] = ((env.get("factors") or {}).get("treatment"))
-                    env_meta["cage"] = ((env.get("blocking") or {}).get("pen") or (env.get("blocking") or {}).get("cage"))
-                    env_meta["weight"] = ((env.get("covariates") or {}).get("weight"))
+                    e = env_doc.get("environment", {})
+                    env_meta["env_id"] = e.get("id")
+                    env_meta["treatment"] = ((e.get("factors") or {}).get("treatment"))
+                    env_meta["cage"] = ((e.get("blocking") or {}).get("pen") or (e.get("blocking") or {}).get("cage"))
+                    env_meta["weight"] = ((e.get("covariates") or {}).get("weight"))
                 except Exception:
                     pass
 
-                # Find metabolism record for this spot
-                rec_spot = per_spot.get(spot_id) or per_spot_by_sid.get(spot_id) or {}
+                if not rec_spot:
+                    # No metabolism for this spot; we can still advance progress.
+                    if use_progress and progress_ctx is not None:
+                        progress_ctx.advance(task_id, 1)
+                    continue
+
                 microbes_block = (rec_spot.get("microbes") or {})
+                # If metabolism lacks microbes, skip
                 if not microbes_block:
                     if use_progress and progress_ctx is not None:
                         progress_ctx.advance(task_id, 1)
                     continue
 
+                # Row assembly
                 for mid, mrec in microbes_block.items():
-                    # Collect requested targets per microbe
                     vals = [_extract_single_target(mrec, t) for t in targets]
                     combined = _combine_targets(vals, target_op, require_all=combine_require_all)
                     if combined is None:
-                        continue  # skip if nothing to supervise
+                        if debug_missing:
+                            missing_rows.append({
+                                "spot_key": matched_key,
+                                "spot_candidates": ";".join(keys),
+                                "microbe": mid,
+                                "targets": "|".join(targets),
+                                "values": json.dumps(vals),
+                            })
+                        continue
 
                     feats = _flatten_features_from_spot(
                         spot,
@@ -274,8 +328,9 @@ def build_cmd(
                         include_abundance=include_abundance,
                         include_transcripts_sum=include_transcripts_sum,
                     )
+
                     row = {
-                        "spot_id": spot_id,
+                        "spot_id": str(spot.get("name") or spot.get("id") or matched_key or sid),
                         "microbe": mid,
                         **env_meta,
                         "target": combined,
@@ -294,21 +349,17 @@ def build_cmd(
         if use_progress and progress_ctx is not None:
             progress_ctx.stop()
 
+    if debug_missing and missing_rows:
+        miss_path = outdir / "missing_targets.csv"
+        pd.DataFrame(missing_rows).to_csv(miss_path, index=False)
+        typer.secho(f"Wrote debug of missing targets: {miss_path}", fg=typer.colors.YELLOW)
+
     if not rows:
-        seen_spots = sorted(set(per_spot.keys()) | set(per_spot_by_sid.keys()))
-        typer.secho(f"No rows assembled. targets={targets}, op={target_op}", fg=typer.colors.RED)
-        if seen_spots:
-            typer.secho(f"Spots present in metabolism JSON (first 10): {seen_spots[:10]}", fg=typer.colors.YELLOW)
-        else:
-            typer.secho("No spots were found in the metabolism JSON (unexpected).", fg=typer.colors.YELLOW)
-        typer.secho(
-            "Tips:\n"
-            "  • Try a single '--target objective' first to verify joins.\n"
-            "  • For 'flux:EX_*', ensure those EX IDs are recorded in 'fluxes' or 'fluxes_all_exchanges'.\n"
-            "  • Use '--combine-skip-missing' (default) to keep rows if at least one requested flux is present,\n"
-            "    or '--combine-require-all' to drop rows unless all requested targets exist.",
-            fg=typer.colors.BLUE,
-        )
+        # Provide actionable diagnostics
+        seen_spots = list(per_spot.keys())[:20]
+        typer.secho("No rows assembled. Check your metabolism JSON and target selection.", fg=typer.colors.RED)
+        typer.secho(f"First spot keys seen in metabolism JSON: {seen_spots}", fg=typer.colors.BLUE)
+        typer.secho("Try: --spot-join stem  or  --spot-join id  depending on how your JSON is keyed.", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
 
     df = pd.DataFrame(rows)
@@ -342,6 +393,7 @@ def build_cmd(
         }])),
         "columns": list(df.columns),
         "types": {c: str(df[c].dtype) for c in df.columns},
+        "spot_join": spot_join,
     }
     (outdir / "schema.json").write_text(json.dumps(schema, indent=2))
 
