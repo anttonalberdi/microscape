@@ -17,291 +17,278 @@ from rich.progress import (
     MofNCompleteColumn,
 )
 
-app = typer.Typer(add_completion=False, no_args_is_help=True)
+# Reuse predict-time helpers (local copies to keep module standalone)
+def _standardize_with_stats(X: pd.DataFrame, means: Dict[str, float], sds: Dict[str, float]) -> pd.DataFrame:
+    Z = X.copy()
+    for c in Z.columns:
+        mu = float(means.get(c, Z[c].mean()))
+        sd = float(sds.get(c, Z[c].std(ddof=0) or 1.0))
+        if sd == 0:
+            sd = 1.0
+        Z[c] = (Z[c].astype(float) - mu) / sd
+    return Z
 
+def _rff_apply(coords: np.ndarray, params: Dict[str, Any]) -> pd.DataFrame:
+    D = int(params["D"])
+    omega = np.array(params["omega"], dtype=float)  # (D, d)
+    b = np.array(params["b"], dtype=float)          # (D,)
+    proj = coords @ omega.T + b
+    phi = np.sqrt(2.0 / D) * np.cos(proj)
+    cols = [f"rff:{i}" for i in range(D)]
+    return pd.DataFrame(phi, columns=cols)
 
-def _hdi(x: np.ndarray, prob: float = 0.95, axis: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
+def _posterior_array(idata, name: str):
+    try:
+        return idata.posterior[name].to_numpy()
+    except Exception:
+        return None
+
+def _encode_with_map(series: pd.Series, mapping: Dict[str, int]):
+    if not mapping: return None
+    return series.fillna("__NA__").astype(str).map(mapping).values.astype(int)
+
+def _hdi(x: np.ndarray, prob: float = 0.95, axis: Optional[int] = None):
     lo = (1.0 - prob) / 2.0
     hi = 1.0 - lo
     q = np.quantile(x, [lo, hi], axis=axis)
     return q[0], q[1]
 
 
-def _posterior_array(idata, name: str) -> Optional[np.ndarray]:
-    try:
-        return idata.posterior[name].to_numpy()
-    except Exception:
-        return None
+app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 
-def _encode_with_map(series: pd.Series, mapping: Dict[str, int], policy: str) -> Optional[np.ndarray]:
-    if not mapping:
-        return None
-    ser = series.fillna("__NA__").astype(str)
-    idx = ser.map(mapping)
-    if idx.isna().any():
-        unknown = sorted(set(ser[idx.isna()]))
-        if policy == "error":
-            raise typer.BadParameter(f"Unknown group levels: {unknown}")
-        idx = idx.fillna(-1)
-    return idx.astype(int).values
+def _load_table(path: Path) -> pd.DataFrame:
+    if path.suffix.lower() == ".parquet":
+        return pd.read_parquet(path)
+    return pd.read_csv(path)
 
 
-def _standardize_with_stats(df: pd.DataFrame, feature_cols: List[str], means: Dict[str, float], sds: Dict[str, float]) -> pd.DataFrame:
-    X = df[feature_cols].copy()
-    for c in feature_cols:
-        mu = float(means.get(c, X[c].mean()))
-        sd = float(sds.get(c, X[c].std(ddof=0) or 1.0))
-        if sd == 0:
-            sd = 1.0
-        X[c] = (X[c].astype(float) - mu) / sd
-    return X
-
-
-def _compute_train_feature_stats(train_table: Path, features: List[str]) -> Tuple[Dict[str, float], Dict[str, float]]:
-    if train_table.suffix.lower() == ".parquet":
-        tr = pd.read_parquet(train_table)
-    else:
-        tr = pd.read_csv(train_table)
-    X = tr[features].copy()
-    if "abundance" in X.columns:
-        X["abundance"] = np.log1p(X["abundance"].astype(float))
-    means = {c: float(X[c].mean()) for c in X.columns}
-    sds = {c: float(X[c].std(ddof=0) or 1.0) for c in X.columns}
-    for c in list(sds):
-        if sds[c] == 0:
-            sds[c] = 1.0
-    return means, sds
-
-
-def _parse_assignments(items: List[str]) -> Dict[str, float | str]:
-    out: Dict[str, float | str] = {}
-    for it in items or []:
-        if "=" not in it:
-            raise typer.BadParameter(f"Invalid --set '{it}', expected form col=value")
-        col, val = it.split("=", 1)
-        col = col.strip()
-        val = val.strip()
-        try:
-            out[col] = float(val)
-        except ValueError:
-            out[col] = val
-    return out
-
-
-def _parse_deltas(items: List[str]) -> Dict[str, float]:
-    out: Dict[str, float] = {}
-    for it in items or []:
-        if "=" not in it:
-            raise typer.BadParameter(f"Invalid --delta '{it}', expected form col=+/-value")
-        col, val = it.split("=", 1)
-        col = col.strip()
-        try:
-            out[col] = float(val)
-        except ValueError:
-            raise typer.BadParameter(f"Delta value for '{col}' is not numeric: '{val}'")
-    return out
-
-
-def _apply_select(df: pd.DataFrame, selectors: List[str]) -> pd.DataFrame:
-    if not selectors:
-        return df
-    mask = np.ones(len(df), dtype=bool)
-    for sel in selectors:
-        if "=" not in sel:
-            raise typer.BadParameter(f"Invalid --select '{sel}', expected col=value")
-        col, val = sel.split("=", 1)
-        col = col.strip()
-        val = val.strip()
-        if col not in df.columns:
-            raise typer.BadParameter(f"Select column '{col}' not found in table.")
-        mask &= df[col].astype(str) == val
-    return df.loc[mask]
+def _apply_scope_mask(df: pd.DataFrame, scope: str) -> np.ndarray:
+    """scope: 'all' | 'spot:S0001' | 'env:E001'"""
+    if scope == "all" or not scope:
+        return np.ones(len(df), dtype=bool)
+    if scope.startswith("spot:"):
+        sid = scope.split(":", 1)[1]
+        return (df.get("spot_id") == sid).values
+    if scope.startswith("env:"):
+        eid = scope.split(":", 1)[1]
+        return (df.get("env_id") == eid).values
+    return np.ones(len(df), dtype=bool)
 
 
 @app.command("whatif")
 def whatif_cmd(
-    posterior_nc: Path = typer.Argument(..., help="Path to posterior.nc saved by 'microscape train'."),
-    model_card: Path = typer.Argument(..., help="Path to model_card.json saved by 'microscape train'."),
-    table: Path = typer.Option(None, help="Table (CSV/Parquet) to select baseline rows from. Defaults to training table in model_card."),
-    outdir: Path = typer.Option("outputs/whatif", help="Where to write what-if results."),
-    select: List[str] = typer.Option(None, "--select", help="Row selector(s) like 'spot_id=S0001' (ANDed). Repeatable."),
-    limit: Optional[int] = typer.Option(50, help="Max number of selected rows to process (default 50)."),
-    set_: List[str] = typer.Option(None, "--set", help="Set features or groups, e.g., 'met:C0010=8.0', 'abundance=100', 'treatment=diet_B'."),
-    delta: List[str] = typer.Option(None, "--delta", help="Add deltas to numeric features, e.g., 'abundance=+10', 'met:C0010=-2.5'."),
-    hdi_prob: float = typer.Option(0.95, help="Credible interval probability for HDIs."),
-    new_level_policy: str = typer.Option("zero", help="For unseen group levels: 'zero' (no RE) or 'error'."),
-    progress: bool = typer.Option(True, "--progress/--no-progress", help="Show a progress bar."),
+    table: Path = typer.Argument(..., help="Existing modeling table (CSV or Parquet)."),
+    outdir: Path = typer.Option("outputs/whatif", help="Where to save the modified table and (optionally) predictions."),
+    # Batch operations
+    drop_microbe: List[str] = typer.Option(None, "--drop-microbe", help="Remove a microbe across scope (rows where microbe==ID)."),
+    zero_metabolite: List[str] = typer.Option(None, "--zero-metabolite", help="Set a metabolite feature 'met:ID' to 0 across scope."),
+    set_abundance: List[str] = typer.Option(None, "--set-abundance", help="microbe=value; set abundance for that microbe within scope."),
+    scale_abundance: List[str] = typer.Option(None, "--scale-abundance", help="microbe=factor; multiply abundance within scope."),
+    set_metabolite: List[str] = typer.Option(None, "--set-metabolite", help="Cxxxx=value; set 'met:Cxxxx' within scope."),
+    scale_metabolite: List[str] = typer.Option(None, "--scale-metabolite", help="Cxxxx=factor; scale 'met:Cxxxx' within scope."),
+    scope: str = typer.Option("all", help="Scope: all | spot:S0001 | env:E001"),
+    # Optional prediction in one go
+    posterior_nc: Optional[Path] = typer.Option(None, help="If provided, run prediction after edits."),
+    model_card: Optional[Path] = typer.Option(None, help="Required with --posterior-nc to reconstruct features/RFF."),
+    hdi_prob: float = typer.Option(0.95, help="HDI for predictions."),
+    include_draws: bool = typer.Option(False, help="Write per-draw predictions too (large)."),
+    progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress bar."),
 ):
     outdir = outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
-    card = json.loads(Path(model_card).read_text())
-    features: List[str] = card.get("features") or []
-    target_col = card.get("target") or "target"
-    train_table_path = Path(card.get("table")) if card.get("table") else None
-    group_maps = card.get("group_maps") or {}
-    cage_map = group_maps.get("cage") or {}
-    env_map = group_maps.get("env") or {}
-    treat_map = group_maps.get("treatment") or {}
-    feature_means = card.get("feature_means") or {}
-    feature_sds = card.get("feature_sds") or {}
+    df = _load_table(table).copy()
+    mask = _apply_scope_mask(df, scope)
 
-    base_table = Path(table) if table else train_table_path
-    if base_table is None:
-        raise typer.BadParameter("No table provided and training table path not found in model_card.json")
-    if base_table.suffix.lower() == ".parquet":
-        df_all = pd.read_parquet(base_table)
-    else:
-        df_all = pd.read_csv(base_table)
+    # --- Apply edits ---
+    if drop_microbe:
+        before = len(df)
+        df = df[~(df["microbe"].isin(drop_microbe) & mask)].copy()
+        typer.secho(f"Dropped {before - len(df)} row(s) matching microbes in scope.", fg=typer.colors.YELLOW)
 
-    df_sel = _apply_select(df_all, select)
-    if limit is not None and len(df_sel) > limit:
-        df_sel = df_sel.head(limit)
-        typer.secho(f"Selected rows truncated to first {limit}. Use --limit to change.", fg=typer.colors.YELLOW)
-    if df_sel.empty:
-        raise typer.BadParameter("Selection returned 0 rows. Adjust --select filters.")
+    def _parse_pairs(kvs: List[str], kind: str) -> Dict[str, float]:
+        parsed = {}
+        for kv in kvs or []:
+            if "=" not in kv:
+                raise typer.BadParameter(f"--{kind} expects entries like name=value, got '{kv}'")
+            k, v = kv.split("=", 1)
+            parsed[k.strip()] = float(v)
+        return parsed
 
-    set_vals = _parse_assignments(set_ or [])
-    deltas = _parse_deltas(delta or [])
+    # abundance is per (spot,microbe)
+    set_ab = _parse_pairs(set_abundance, "set-abundance")
+    sc_ab = _parse_pairs(scale_abundance, "scale-abundance")
 
+    if set_ab:
+        for m, val in set_ab.items():
+            sel = (df["microbe"] == m) & mask
+            df.loc[sel, "abundance"] = float(val)
+    if sc_ab:
+        for m, fac in sc_ab.items():
+            sel = (df["microbe"] == m) & mask
+            df.loc[sel, "abundance"] = df.loc[sel, "abundance"].astype(float) * float(fac)
+
+    # metabolites are spot-level columns 'met:*'
+    set_met = _parse_pairs(set_metabolite, "set-metabolite")
+    sc_met = _parse_pairs(scale_metabolite, "scale-metabolite")
+
+    for cid, val in set_met.items():
+        col = f"met:{cid}" if not cid.startswith("met:") else cid
+        if col in df.columns:
+            df.loc[mask, col] = float(val)
+    for cid, fac in sc_met.items():
+        col = f"met:{cid}" if not cid.startswith("met:") else cid
+        if col in df.columns:
+            df.loc[mask, col] = df.loc[mask, col].astype(float) * float(fac)
+
+    for cid in zero_metabolite or []:
+        col = f"met:{cid}" if not cid.startswith("met:") else cid
+        if col in df.columns:
+            df.loc[mask, col] = 0.0
+
+    # Save modified table (CSV + Parquet if possible)
+    csv_path = outdir / "table_modified.csv"
+    df.to_csv(csv_path, index=False)
     try:
-        import arviz as az
-    except Exception as e:
-        raise typer.BadParameter(f"arviz is required to read posterior: {e}")
-    idata = az.from_netcdf(posterior_nc)
+        pq_path = outdir / "table_modified.parquet"
+        df.to_parquet(pq_path, index=False)
+    except Exception:
+        pq_path = None
 
-    alpha = _posterior_array(idata, "alpha")
-    beta  = _posterior_array(idata, "beta")
-    a_cage = _posterior_array(idata, "a_cage")
-    a_env  = _posterior_array(idata, "a_env")
-    gamma_t = _posterior_array(idata, "gamma_t")
+    typer.echo(f"Modified table saved: {csv_path}")
+    if pq_path:
+        typer.echo(f"Parquet: {pq_path}")
 
-    if alpha is None or beta is None:
-        raise typer.BadParameter("Posterior file missing 'alpha' or 'beta'. Was the model trained correctly?")
+    # --- Optional prediction step (uses spatial RFF if model_card contains it) ---
+    if posterior_nc and model_card:
+        card = json.loads(Path(model_card).read_text())
+        features: List[str] = card.get("features") or []
+        feature_means = card.get("feature_means") or {}
+        feature_sds = card.get("feature_sds") or {}
+        spatial = card.get("spatial") or {}
+        group_maps = card.get("group_maps") or {}
+        cage_map = group_maps.get("cage") or {}
+        env_map = group_maps.get("env") or {}
+        treat_map = group_maps.get("treatment") or {}
 
-    if feature_means and feature_sds:
-        means = {k: float(v) for k, v in feature_means.items()}
-        sds = {k: float(v) for k, v in feature_sds.items()}
-    else:
-        means, sds = _compute_train_feature_stats(train_table_path, features)
+        # Rebuild X like in predict
+        base_cols = [c for c in features if not c.startswith("rff:")]
+        rff_cols = [c for c in features if c.startswith("rff:")]
 
-    def mu_draws_for(df_small: pd.DataFrame) -> np.ndarray:
-        X_raw = df_small[features].copy()
-        if "abundance" in X_raw.columns:
-            if (X_raw["abundance"] < -1).any():
-                raise typer.BadParameter("Found abundance < -1 after modification; log1p undefined.")
-            X_raw["abundance"] = np.log1p(X_raw["abundance"].astype(float))
-        X_std = _standardize_with_stats(X_raw, features, means, sds).values.astype(float)
+        # Ensure base columns present
+        missing = [c for c in base_cols if c not in df.columns]
+        if missing:
+            raise typer.BadParameter(f"Modified table missing required base features: {missing}")
 
-        cage_idx = _encode_with_map(df_small["cage"], cage_map, new_level_policy) if "cage" in df_small.columns and cage_map else None
-        env_idx  = _encode_with_map(df_small["env_id"], env_map, new_level_policy) if "env_id" in df_small.columns and env_map else None
-        tr_idx   = _encode_with_map(df_small["treatment"], treat_map, new_level_policy) if "treatment" in df_small.columns and treat_map else None
+        X_base = df[base_cols].copy()
+        if "abundance" in X_base.columns:
+            if (X_base["abundance"] < -1).any():
+                raise typer.BadParameter("'abundance' has values < -1; log1p undefined.")
+            X_base["abundance"] = np.log1p(X_base["abundance"].astype(float))
+        X_base = _standardize_with_stats(X_base, feature_means, feature_sds)
 
-        m = X_std.shape[0]
-        base = alpha[..., None] + np.einsum("cdk,mk->cdm", beta, X_std)
+        if rff_cols:
+            rff = spatial or {}
+            if not (rff.get("rff_gp") and rff.get("rff_params")):
+                raise typer.BadParameter("Model used rff:* features but rff_params missing.")
+            rff_params = rff["rff_params"]
+            coord_cols = rff_params.get("coord_cols") or [c for c in ["x_um","y_um","z_um"] if c in df.columns]
+            if len(coord_cols) < 2:
+                raise typer.BadParameter("RFF model expects at least x_um and y_um in the table.")
+            coords = df[coord_cols].to_numpy(dtype=float)
+            Phi = _rff_apply(coords, rff_params)
+            Phi = Phi[rff_cols]
+            X = pd.concat([X_base, Phi], axis=1)
+            X = X[features]
+        else:
+            X = X_base
 
-        if a_cage is not None and cage_idx is not None:
-            mask = cage_idx >= 0
-            if mask.any():
-                base[..., mask] = base[..., mask] + a_cage[:, :, cage_idx[mask]]
-        if a_env is not None and env_idx is not None:
-            mask = env_idx >= 0
-            if mask.any():
-                base[..., mask] = base[..., mask] + a_env[:, :, env_idx[mask]]
-        if gamma_t is not None and tr_idx is not None:
-            mask = tr_idx >= 0
-            if mask.any():
-                base[..., mask] = base[..., mask] + gamma_t[:, :, tr_idx[mask]]
+        # Encodings
+        cage_idx = _encode_with_map(df["cage"], cage_map) if "cage" in df.columns and cage_map else None
+        env_idx  = _encode_with_map(df["env_id"], env_map) if "env_id" in df.columns and env_map else None
+        tr_idx   = _encode_with_map(df["treatment"], treat_map) if "treatment" in df.columns and treat_map else None
 
-        return base
-
-    df_mod = df_sel.copy()
-    for col, val in set_vals.items():
-        if col not in df_mod.columns:
-            raise typer.BadParameter(f"--set refers to column '{col}' not present in table.")
-        df_mod[col] = val
-    for col, d in deltas.items():
-        if col not in df_mod.columns:
-            raise typer.BadParameter(f"--delta refers to column '{col}' not present in table.")
         try:
-            df_mod[col] = pd.to_numeric(df_mod[col], errors="raise") + d
-        except Exception:
-            raise typer.BadParameter(f"--delta column '{col}' is not numeric; cannot add delta.")
+            import arviz as az
+        except Exception as e:
+            raise typer.BadParameter(f"arviz is required for prediction: {e}")
+        idata = az.from_netcdf(posterior_nc)
 
-    use_progress = progress
-    prog = Progress(
-        SpinnerColumn(),
-        TextColumn("[bold]What-if[/bold]"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        MofNCompleteColumn(),
-        TimeRemainingColumn(),
-        transient=True,
-    ) if use_progress else None
+        alpha = _posterior_array(idata, "alpha")
+        beta  = _posterior_array(idata, "beta")
+        a_cage = _posterior_array(idata, "a_cage")
+        a_env  = _posterior_array(idata, "a_env")
+        gamma_t = _posterior_array(idata, "gamma_t")
 
-    if use_progress and prog is not None:
-        prog.start()
-        task = prog.add_task("Computing", total=len(df_sel))
+        if alpha is None or beta is None:
+            raise typer.BadParameter("Posterior missing 'alpha' or 'beta'.")
 
-    mu_base = mu_draws_for(df_sel)
-    mu_new  = mu_draws_for(df_mod)
+        n_obs = df.shape[0]
+        n_feat = beta.shape[-1]
+        if X.shape[1] != n_feat:
+            raise typer.BadParameter(f"Feature mismatch: X has {X.shape[1]}, beta has {n_feat}.")
 
-    if use_progress and prog is not None:
-        prog.advance(task, len(df_sel))
-        prog.stop()
+        use_progress = progress
+        prog = Progress(
+            SpinnerColumn(),
+            TextColumn("[bold]What-if predict[/bold]"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            MofNCompleteColumn(),
+            TimeRemainingColumn(),
+            transient=True,
+        ) if use_progress else None
 
-    C, D, N = mu_base.shape
-    base_flat = mu_base.reshape(-1, N)
-    new_flat  = mu_new.reshape(-1, N)
-    delta_flat = new_flat - base_flat
+        if use_progress and prog is not None:
+            prog.start()
+            task = prog.add_task("Computing posterior predictions", total=n_obs)
 
-    base_mean = base_flat.mean(axis=0)
-    base_lo, base_hi = _hdi(base_flat, prob=hdi_prob, axis=0)
+        chunk = max(1, n_obs // 20)
+        mu_chunks = []
+        for start in range(0, n_obs, chunk):
+            end = min(n_obs, start + chunk)
+            X_chunk = X.values[start:end, :]
+            base = alpha[..., None] + np.einsum("cdk,mk->cdm", beta, X_chunk)
+            if a_cage is not None and cage_idx is not None:
+                idx = cage_idx[start:end]
+                base = base + a_cage[:, :, idx]
+            if a_env is not None and env_idx is not None:
+                idx = env_idx[start:end]
+                base = base + a_env[:, :, idx]
+            if gamma_t is not None and tr_idx is not None:
+                idx = tr_idx[start:end]
+                base = base + gamma_t[:, :, idx]
+            mu_chunks.append(base)
+            if use_progress and prog is not None:
+                prog.advance(task, end - start)
 
-    new_mean = new_flat.mean(axis=0)
-    new_lo, new_hi = _hdi(new_flat, prob=hdi_prob, axis=0)
+        if use_progress and prog is not None:
+            prog.stop()
 
-    d_mean = delta_flat.mean(axis=0)
-    d_lo, d_hi = _hdi(delta_flat, prob=hdi_prob, axis=0)
+        mu = np.concatenate(mu_chunks, axis=-1)  # (C,D,N)
+        flat = mu.reshape(-1, n_obs)
+        mean = flat.mean(axis=0)
+        lo, hi = _hdi(flat, prob=hdi_prob, axis=0)
 
-    keep_cols = [c for c in ["spot_id", "microbe", "env_id", "cage", "treatment"] if c in df_sel.columns]
-    out = df_sel[keep_cols].copy() if keep_cols else pd.DataFrame(index=df_sel.index)
-    out["y_base_mean"] = base_mean
-    out[f"y_base_hdi{int(hdi_prob*100)}_low"] = base_lo
-    out[f"y_base_hdi{int(hdi_prob*100)}_high"] = base_hi
+        meta_cols = [c for c in ["spot_id", "microbe", "env_id", "cage", "treatment"] if c in df.columns]
+        out_df = df[meta_cols].copy() if meta_cols else pd.DataFrame(index=df.index)
+        out_df["y_hat_mean"] = mean
+        out_df[f"y_hat_hdi{int(hdi_prob*100)}_low"] = lo
+        out_df[f"y_hat_hdi{int(hdi_prob*100)}_high"] = hi
 
-    out["y_new_mean"] = new_mean
-    out[f"y_new_hdi{int(hdi_prob*100)}_low"] = new_lo
-    out[f"y_new_hdi{int(hdi_prob*100)}_high"] = new_hi
+        pred_path = outdir / "whatif_predictions.csv"
+        out_df.to_csv(pred_path, index=False)
+        typer.echo(f"Predictions written: {pred_path}")
 
-    out["delta_mean"] = d_mean
-    out[f"delta_hdi{int(hdi_prob*100)}_low"] = d_lo
-    out[f"delta_hdi{int(hdi_prob*100)}_high"] = d_hi
+        if include_draws:
+            npz_path = outdir / "whatif_predictions_draws.npz"
+            np.savez_compressed(npz_path, draws=flat.T)
+            typer.echo(f"Per-draw matrix: {npz_path}")
 
-    changed_cols = sorted(set(list(_parse_assignments(set_ or {}).keys()) + list(_parse_deltas(delta or {}).keys())))
-    for col in changed_cols:
-        if col in df_sel.columns:
-            out[f"{col}_base"] = df_sel[col].values
-            out[f"{col}_new"] = df_mod[col].values
+    else:
+        typer.echo("No posterior/model_card given; skipped prediction.")
 
-    out_csv = Path(outdir) / "whatif.csv"
-    out.to_csv(out_csv, index=False)
 
-    meta = {
-        "hdi_prob": hdi_prob,
-        "n_rows": int(len(out)),
-        "selectors": select or [],
-        "limit": limit,
-        "set": set_ or [],
-        "delta": delta or [],
-        "new_level_policy": new_level_policy,
-        "features": features,
-        "uses_training_table": str(base_table == train_table_path),
-        "training_table": str(train_table_path),
-        "baseline_table": str(base_table),
-    }
-    (Path(outdir) / "whatif_meta.json").write_text(json.dumps(meta, indent=2))
-
-    typer.echo(f"What-if results written to {out_csv}")
-    typer.echo(f"Meta: {Path(outdir) / 'whatif_meta.json'}")
+if __name__ == "__main__":
+    app()
