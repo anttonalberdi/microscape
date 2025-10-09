@@ -98,7 +98,8 @@ def _prepare_design_with_spatial(
     feature_sds: Dict[str, float],
     spatial_card: Dict[str, Any],
 ) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray, List[str]]:
-    """Rebuild the design matrix X in the SAME column order used by training:
+    """
+    Rebuild the design matrix X in the SAME column order used by training:
       - standardize base features using saved (means, sds)
       - recreate RFF features (if used) from saved params and append in place
     Returns:
