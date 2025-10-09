@@ -75,9 +75,9 @@ def _coef_summary(arr: np.ndarray, names: List[str], hdi_prob: float = 0.95) -> 
 # ------------- RFF helpers -------------
 
 def _rff_apply(coords: np.ndarray, params: Dict[str, Any]) -> pd.DataFrame:
-    \"\"\"Recreate RFF features from saved parameters (omega, b, D).
+    """Recreate RFF features from saved parameters (omega, b, D).
     coords: (N, d) with columns in the same order used during training.
-    \"\"\"
+    """
     D = int(params["D"])
     omega = np.array(params["omega"], dtype=float)  # (D, d)
     b = np.array(params["b"], dtype=float)          # (D,)
@@ -97,12 +97,12 @@ def _prepare_design_with_spatial(
     feature_sds: Dict[str, float],
     spatial_card: Dict[str, Any],
 ) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray, List[str]]:
-    \"\"\"Rebuild the design matrix X in the SAME column order used by training:
+    """Rebuild the design matrix X in the SAME column order used by training:
       - standardize base features using saved (means, sds)
       - recreate RFF features (if used) from saved params and append in place
     Returns:
       df (original rows), X (N,K), y (N,), meta_cols (for reporting)
-    \"\"\"
+    """
     if table.suffix.lower() == ".parquet":
         df = pd.read_parquet(table)
     else:
@@ -212,8 +212,6 @@ def evaluate_cmd(
     if n_feat != X_mat.shape[1]:
         raise typer.BadParameter(f"Feature mismatch: posterior has K={n_feat}, table has {X_mat.shape[1]}.")
 
-    C, D = alpha.shape[0], alpha.shape[1]
-
     # Progress
     use_progress = progress
     prog = Progress(
@@ -236,6 +234,7 @@ def evaluate_cmd(
     for start in range(0, n_obs, chunk):
         end = min(n_obs, start + chunk)
         X_chunk = X_mat[start:end, :]  # (m, K)
+        # alpha: (C,D), beta: (C,D,K)
         base = alpha[..., None] + np.einsum("cdk,mk->cdm", beta, X_chunk)
         if a_cage is not None and cage_idx is not None:
             idx = cage_idx[start:end]
@@ -279,7 +278,7 @@ def evaluate_cmd(
     coef_df.loc[-1] = ["alpha", a_mean, a_sd, a_lo[0], a_hi[0], a_pgt0, a_plt0]
     coef_df = coef_df.reset_index(drop=True)
 
-    # Group summaries (if present)
+    # Outputs
     outputs = []
     meta_cols = [c for c in ["spot_id", "microbe", "env_id", "cage", "treatment"] if c in df.columns]
     pred_df = df[meta_cols].copy() if meta_cols else pd.DataFrame(index=df.index)
@@ -293,60 +292,6 @@ def evaluate_cmd(
 
     (outdir / "coef_summary.csv").write_text(coef_df.to_csv(index=False))
     outputs.append(("Coefficients", outdir / "coef_summary.csv"))
-
-    if "treatment" in group_maps and _posterior_array(idata, "gamma_t") is not None and group_maps["treatment"]:
-        gamma_t = _posterior_array(idata, "gamma_t")
-        inv_map = {v: k for k, v in group_maps["treatment"].items()}
-        levels = [inv_map[i] for i in range(len(inv_map))]
-        tr_flat = gamma_t.reshape(-1, gamma_t.shape[-1])
-        tr_mean = tr_flat.mean(axis=0)
-        tr_sd = tr_flat.std(axis=0, ddof=0)
-        tr_lo, tr_hi = _hdi(tr_flat, prob=hdi_prob, axis=0)
-        tr_df = pd.DataFrame({
-            "treatment": levels,
-            "mean": tr_mean,
-            "sd": tr_sd,
-            f"hdi{int(hdi_prob*100)}_low": tr_lo,
-            f"hdi{int(hdi_prob*100)}_high": tr_hi,
-        })
-        (outdir / "treatment_effects.csv").write_text(tr_df.to_csv(index=False))
-        outputs.append(("Treatment effects", outdir / "treatment_effects.csv"))
-
-    if "cage" in group_maps and _posterior_array(idata, "a_cage") is not None and group_maps["cage"]:
-        a_cage = _posterior_array(idata, "a_cage")
-        inv = {v: k for k, v in group_maps["cage"].items()}
-        levels = [inv[i] for i in range(len(inv))]
-        re_flat = a_cage.reshape(-1, a_cage.shape[-1])
-        re_mean = re_flat.mean(axis=0)
-        re_sd = re_flat.std(axis=0, ddof=0)
-        re_lo, re_hi = _hdi(re_flat, prob=hdi_prob, axis=0)
-        re_df = pd.DataFrame({
-            "cage": levels,
-            "mean": re_mean,
-            "sd": re_sd,
-            f"hdi{int(hdi_prob*100)}_low": re_lo,
-            f"hdi{int(hdi_prob*100)}_high": re_hi,
-        })
-        (outdir / "random_intercepts_cage.csv").write_text(re_df.to_csv(index=False))
-        outputs.append(("RE (cage)", outdir / "random_intercepts_cage.csv"))
-
-    if "env" in group_maps and _posterior_array(idata, "a_env") is not None and group_maps["env"]:
-        a_env = _posterior_array(idata, "a_env")
-        inv = {v: k for k, v in group_maps["env"].items()}
-        levels = [inv[i] for i in range(len(inv))]
-        re_flat = a_env.reshape(-1, a_env.shape[-1])
-        re_mean = re_flat.mean(axis=0)
-        re_sd = re_flat.std(axis=0, ddof=0)
-        re_lo, re_hi = _hdi(re_flat, prob=hdi_prob, axis=0)
-        re_df = pd.DataFrame({
-            "env_id": levels,
-            "mean": re_mean,
-            "sd": re_sd,
-            f"hdi{int(hdi_prob*100)}_low": re_lo,
-            f"hdi{int(hdi_prob*100)}_high": re_hi,
-        })
-        (outdir / "random_intercepts_env.csv").write_text(re_df.to_csv(index=False))
-        outputs.append(("RE (env)", outdir / "random_intercepts_env.csv"))
 
     # Metrics
     metrics = {
@@ -363,3 +308,6 @@ def evaluate_cmd(
     for label, path in outputs:
         typer.echo(f"  {label:18}: {path}")
     typer.echo(f"  Metrics           : {outdir / 'metrics.json'}")
+
+if __name__ == "__main__":
+    app()
