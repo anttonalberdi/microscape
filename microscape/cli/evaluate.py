@@ -75,7 +75,8 @@ def _coef_summary(arr: np.ndarray, names: List[str], hdi_prob: float = 0.95) -> 
 # ------------- RFF helpers -------------
 
 def _rff_apply(coords: np.ndarray, params: Dict[str, Any]) -> pd.DataFrame:
-    """Recreate RFF features from saved parameters (omega, b, D).
+    """
+    Recreate RFF features from saved parameters (omega, b, D).
     coords: (N, d) with columns in the same order used during training.
     """
     D = int(params["D"])
