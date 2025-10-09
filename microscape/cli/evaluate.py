@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -19,6 +20,8 @@ from rich.progress import (
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 
+# ---------------- utils ----------------
+
 def _hdi(x: np.ndarray, prob: float = 0.95, axis: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
     lo = (1.0 - prob) / 2.0
     hi = 1.0 - lo
@@ -26,37 +29,18 @@ def _hdi(x: np.ndarray, prob: float = 0.95, axis: Optional[int] = None) -> Tuple
     return q[0], q[1]
 
 
-def _standardize_like_train(df: pd.DataFrame, feature_cols: List[str]) -> pd.DataFrame:
-    X = df[feature_cols].copy()
-    for c in feature_cols:
-        mu = X[c].mean()
-        sd = X[c].std(ddof=0) or 1.0
-        X[c] = (X[c] - mu) / sd
-    return X
+def _standardize_with_stats(X: pd.DataFrame, means: Dict[str, float], sds: Dict[str, float]) -> pd.DataFrame:
+    Z = X.copy()
+    for c in Z.columns:
+        mu = float(means.get(c, Z[c].mean()))
+        sd = float(sds.get(c, Z[c].std(ddof=0) or 1.0))
+        if sd == 0:
+            sd = 1.0
+        Z[c] = (Z[c].astype(float) - mu) / sd
+    return Z
 
 
-def _prepare_design(table: Path, features: List[str], target_col: str, log1p_abundance: bool = True):
-    if table.suffix.lower() == ".parquet":
-        df = pd.read_parquet(table)
-    else:
-        df = pd.read_csv(table)
-
-    for c in [target_col, *features]:
-        if c not in df.columns:
-            raise typer.BadParameter(f"Column missing in table: {c}")
-
-    X = df[features].copy()
-    if log1p_abundance and "abundance" in X.columns:
-        X["abundance"] = np.log1p(X["abundance"].astype(float))
-    X_std = _standardize_like_train(X, list(X.columns))
-
-    y = df[target_col].astype(float).values
-    meta_cols = [c for c in ["spot_id", "microbe", "env_id", "cage", "treatment"] if c in df.columns]
-
-    return df, X_std, y, meta_cols
-
-
-def _encode_with_map(series: pd.Series, mapping: Dict[str, int]) -> np.ndarray:
+def _encode_with_map(series: pd.Series, mapping: Dict[str, int]) -> Optional[np.ndarray]:
     if not mapping:
         return None
     return series.fillna("__NA__").astype(str).map(mapping).values.astype(int)
@@ -88,19 +72,90 @@ def _coef_summary(arr: np.ndarray, names: List[str], hdi_prob: float = 0.95) -> 
     })
 
 
-def _rand_eff_summary(arr: np.ndarray, level_names: List[str], hdi_prob: float = 0.95) -> pd.DataFrame:
-    flat = arr.reshape(-1, arr.shape[-1])
-    mean = flat.mean(axis=0)
-    sd = flat.std(axis=0, ddof=0)
-    lo, hi = _hdi(flat, prob=hdi_prob, axis=0)
-    return pd.DataFrame({
-        "level": level_names,
-        "mean": mean,
-        "sd": sd,
-        f"hdi{int(hdi_prob*100)}_low": lo,
-        f"hdi{int(hdi_prob*100)}_high": hi,
-    })
+# ------------- RFF helpers -------------
 
+def _rff_apply(coords: np.ndarray, params: Dict[str, Any]) -> pd.DataFrame:
+    \"\"\"Recreate RFF features from saved parameters (omega, b, D).
+    coords: (N, d) with columns in the same order used during training.
+    \"\"\"
+    D = int(params["D"])
+    omega = np.array(params["omega"], dtype=float)  # (D, d)
+    b = np.array(params["b"], dtype=float)          # (D,)
+    proj = coords @ omega.T + b
+    phi = np.sqrt(2.0 / D) * np.cos(proj)
+    cols = [f"rff:{i}" for i in range(D)]
+    return pd.DataFrame(phi, columns=cols)
+
+
+# ------------- design prep -------------
+
+def _prepare_design_with_spatial(
+    table: Path,
+    features_in_card: List[str],
+    target_col: str,
+    feature_means: Dict[str, float],
+    feature_sds: Dict[str, float],
+    spatial_card: Dict[str, Any],
+) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray, List[str]]:
+    \"\"\"Rebuild the design matrix X in the SAME column order used by training:
+      - standardize base features using saved (means, sds)
+      - recreate RFF features (if used) from saved params and append in place
+    Returns:
+      df (original rows), X (N,K), y (N,), meta_cols (for reporting)
+    \"\"\"
+    if table.suffix.lower() == ".parquet":
+        df = pd.read_parquet(table)
+    else:
+        df = pd.read_csv(table)
+
+    # Separate feature names
+    all_features = list(features_in_card)
+    base_cols = [c for c in all_features if not c.startswith("rff:")]
+    rff_cols = [c for c in all_features if c.startswith("rff:")]
+
+    # Validate presence of base features
+    for c in [target_col, *base_cols]:
+        if c not in df.columns:
+            raise typer.BadParameter(f"Column missing in table: {c}")
+
+    # Build base X with required transforms
+    X_base = df[base_cols].copy()
+    if "abundance" in X_base.columns:
+        if (X_base["abundance"] < -1).any():
+            raise typer.BadParameter("'abundance' has values < -1; log1p undefined.")
+        X_base["abundance"] = np.log1p(X_base["abundance"].astype(float))
+
+    # Standardize base cols using training stats
+    X_base = _standardize_with_stats(X_base, feature_means, feature_sds)
+
+    # Recreate RFF features if the model used them
+    if rff_cols:
+        rff = spatial_card or {}
+        if not (rff.get("rff_gp") and rff.get("rff_params")):
+            raise typer.BadParameter("Model card lists rff:* features but no rff_params found.")
+        rff_params = rff["rff_params"]
+        coord_cols = rff_params.get("coord_cols") or [c for c in ["x_um","y_um","z_um"] if c in df.columns]
+        if len(coord_cols) < 2:
+            raise typer.BadParameter("RFF model expects at least x_um and y_um in the table.")
+        coords = df[coord_cols].to_numpy(dtype=float)
+        Phi = _rff_apply(coords, rff_params)
+        # Sanity check: number and names
+        if len(rff_cols) != Phi.shape[1]:
+            raise typer.BadParameter(f"RFF feature count mismatch: card={len(rff_cols)} vs computed={Phi.shape[1]}")
+        Phi = Phi[rff_cols]  # order to match model
+        # Concatenate base + RFF in the exact order from the card
+        X = pd.concat([X_base, Phi], axis=1)
+        # Ensure column order = features_in_card
+        X = X[all_features]
+    else:
+        X = X_base
+
+    y = df[target_col].astype(float).values
+    meta_cols = [c for c in ["spot_id", "microbe", "env_id", "cage", "treatment"] if c in df.columns]
+    return df, X.values.astype(float), y, meta_cols
+
+
+# ---------------- CLI ----------------
 
 @app.command("evaluate")
 def evaluate_cmd(
@@ -114,20 +169,28 @@ def evaluate_cmd(
     outdir = outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
+    # Load card
     card = json.loads(Path(model_card).read_text())
     features: List[str] = card.get("features") or []
     target_col = card.get("target") or "target"
+    feature_means = card.get("feature_means") or {}
+    feature_sds = card.get("feature_sds") or {}
+    spatial = card.get("spatial") or {}
     group_maps = card.get("group_maps") or {}
     cage_map = group_maps.get("cage") or {}
     env_map = group_maps.get("env") or {}
     treat_map = group_maps.get("treatment") or {}
 
-    df, X_std, y, meta_cols = _prepare_design(table, features, target_col, log1p_abundance=("abundance" in features))
+    # Build design matrix exactly like training (with RFF reconstruction if used)
+    df, X_mat, y, meta_cols = _prepare_design_with_spatial(
+        table, features, target_col, feature_means, feature_sds, spatial
+    )
 
     cage_idx = _encode_with_map(df["cage"], cage_map) if "cage" in df.columns and cage_map else None
     env_idx  = _encode_with_map(df["env_id"], env_map) if "env_id" in df.columns and env_map else None
     tr_idx   = _encode_with_map(df["treatment"], treat_map) if "treatment" in df.columns and treat_map else None
 
+    # Load posterior
     try:
         import arviz as az
     except Exception as e:
@@ -140,20 +203,18 @@ def evaluate_cmd(
     a_cage = _posterior_array(idata, "a_cage")
     a_env  = _posterior_array(idata, "a_env")
     gamma_t = _posterior_array(idata, "gamma_t")
-    sigma_cage = _posterior_array(idata, "sigma_cage")
-    sigma_env  = _posterior_array(idata, "sigma_env")
 
     if alpha is None or beta is None:
         raise typer.BadParameter("Posterior file missing 'alpha' or 'beta'. Was the model trained correctly?")
 
     n_obs = df.shape[0]
     n_feat = beta.shape[-1]
-    if n_feat != X_std.shape[1]:
-        raise typer.BadParameter(f"Feature mismatch: posterior has K={n_feat}, table has {X_std.shape[1]}.")
+    if n_feat != X_mat.shape[1]:
+        raise typer.BadParameter(f"Feature mismatch: posterior has K={n_feat}, table has {X_mat.shape[1]}.")
 
     C, D = alpha.shape[0], alpha.shape[1]
-    X_mat = X_std.values.astype(float)
 
+    # Progress
     use_progress = progress
     prog = Progress(
         SpinnerColumn(),
@@ -169,6 +230,7 @@ def evaluate_cmd(
         prog.start()
         task = prog.add_task("Computing posterior means", total=n_obs)
 
+    # Compute posterior means in chunks
     chunk = max(1, n_obs // 20)  # ~20 chunks
     mu_chunks = []
     for start in range(0, n_obs, chunk):
@@ -205,41 +267,36 @@ def evaluate_cmd(
     r2 = float(1.0 - ss_res / ss_tot)
     coverage = float(np.mean((y >= lo) & (y <= hi)))
 
-    waic_res = None
-    loo_res = None
-    try:
-        import arviz as az
-        waic_res = az.waic(idata).to_dict()
-    except Exception:
-        waic_res = None
-    try:
-        import arviz as az
-        loo_res = az.loo(idata).to_dict()
-    except Exception:
-        loo_res = None
-
-    pred_df = df[meta_cols].copy() if meta_cols else pd.DataFrame(index=df.index)
-    pred_df["target"] = y
-    pred_df["y_hat_mean"] = y_hat_mean
-    pred_df[f"y_hat_hdi{int(hdi_prob*100)}_low"] = lo
-    pred_df[f"y_hat_hdi{int(hdi_prob*100)}_high"] = hi
-    pred_df["residual"] = residual
-    pred_df.to_csv(Path(outdir) / "residuals.csv", index=False)
-
+    # Summaries
     coef_df = _coef_summary(beta, names=features, hdi_prob=hdi_prob)
-    coef_df.loc[-1] = ["alpha"] + [np.nan] * (coef_df.shape[1] - 1)
-    coef_df.reset_index(drop=True, inplace=True)
+    # alpha row at top
     a_flat = alpha.reshape(-1, 1)
     a_mean = a_flat.mean(axis=0)[0]
     a_sd = a_flat.std(axis=0, ddof=0)[0]
     a_lo, a_hi = _hdi(a_flat, prob=hdi_prob, axis=0)
     a_pgt0 = float((a_flat > 0).mean())
     a_plt0 = float((a_flat < 0).mean())
-    coef_df.iloc[0] = ["alpha", a_mean, a_sd, a_lo[0], a_hi[0], a_pgt0, a_plt0]
-    coef_df.to_csv(Path(outdir) / "coef_summary.csv", index=False)
+    coef_df.loc[-1] = ["alpha", a_mean, a_sd, a_lo[0], a_hi[0], a_pgt0, a_plt0]
+    coef_df = coef_df.reset_index(drop=True)
 
-    if gamma_t is not None and treat_map:
-        inv_map = {v: k for k, v in treat_map.items()}
+    # Group summaries (if present)
+    outputs = []
+    meta_cols = [c for c in ["spot_id", "microbe", "env_id", "cage", "treatment"] if c in df.columns]
+    pred_df = df[meta_cols].copy() if meta_cols else pd.DataFrame(index=df.index)
+    pred_df["target"] = y
+    pred_df["y_hat_mean"] = y_hat_mean
+    pred_df[f"y_hat_hdi{int(hdi_prob*100)}_low"] = lo
+    pred_df[f"y_hat_hdi{int(hdi_prob*100)}_high"] = hi
+    pred_df["residual"] = residual
+    (outdir / "residuals.csv").write_text(pred_df.to_csv(index=False))
+    outputs.append(("Residuals", outdir / "residuals.csv"))
+
+    (outdir / "coef_summary.csv").write_text(coef_df.to_csv(index=False))
+    outputs.append(("Coefficients", outdir / "coef_summary.csv"))
+
+    if "treatment" in group_maps and _posterior_array(idata, "gamma_t") is not None and group_maps["treatment"]:
+        gamma_t = _posterior_array(idata, "gamma_t")
+        inv_map = {v: k for k, v in group_maps["treatment"].items()}
         levels = [inv_map[i] for i in range(len(inv_map))]
         tr_flat = gamma_t.reshape(-1, gamma_t.shape[-1])
         tr_mean = tr_flat.mean(axis=0)
@@ -252,10 +309,12 @@ def evaluate_cmd(
             f"hdi{int(hdi_prob*100)}_low": tr_lo,
             f"hdi{int(hdi_prob*100)}_high": tr_hi,
         })
-        tr_df.to_csv(Path(outdir) / "treatment_effects.csv", index=False)
+        (outdir / "treatment_effects.csv").write_text(tr_df.to_csv(index=False))
+        outputs.append(("Treatment effects", outdir / "treatment_effects.csv"))
 
-    if a_cage is not None and cage_map:
-        inv = {v: k for k, v in cage_map.items()}
+    if "cage" in group_maps and _posterior_array(idata, "a_cage") is not None and group_maps["cage"]:
+        a_cage = _posterior_array(idata, "a_cage")
+        inv = {v: k for k, v in group_maps["cage"].items()}
         levels = [inv[i] for i in range(len(inv))]
         re_flat = a_cage.reshape(-1, a_cage.shape[-1])
         re_mean = re_flat.mean(axis=0)
@@ -268,10 +327,12 @@ def evaluate_cmd(
             f"hdi{int(hdi_prob*100)}_low": re_lo,
             f"hdi{int(hdi_prob*100)}_high": re_hi,
         })
-        re_df.to_csv(Path(outdir) / "random_intercepts_cage.csv", index=False)
+        (outdir / "random_intercepts_cage.csv").write_text(re_df.to_csv(index=False))
+        outputs.append(("RE (cage)", outdir / "random_intercepts_cage.csv"))
 
-    if a_env is not None and env_map:
-        inv = {v: k for k, v in env_map.items()}
+    if "env" in group_maps and _posterior_array(idata, "a_env") is not None and group_maps["env"]:
+        a_env = _posterior_array(idata, "a_env")
+        inv = {v: k for k, v in group_maps["env"].items()}
         levels = [inv[i] for i in range(len(inv))]
         re_flat = a_env.reshape(-1, a_env.shape[-1])
         re_mean = re_flat.mean(axis=0)
@@ -284,27 +345,21 @@ def evaluate_cmd(
             f"hdi{int(hdi_prob*100)}_low": re_lo,
             f"hdi{int(hdi_prob*100)}_high": re_hi,
         })
-        re_df.to_csv(Path(outdir) / "random_intercepts_env.csv", index=False)
+        (outdir / "random_intercepts_env.csv").write_text(re_df.to_csv(index=False))
+        outputs.append(("RE (env)", outdir / "random_intercepts_env.csv"))
 
+    # Metrics
     metrics = {
         "n_obs": int(n_obs),
         "hdi_prob": hdi_prob,
-        "rmse": rmse,
-        "mae": mae,
-        "r2": r2,
-        "coverage": coverage,
-        "waic": waic_res,
-        "loo": loo_res,
+        "rmse": float(rmse),
+        "mae": float(mae),
+        "r2": float(r2),
+        "coverage": float(coverage),
     }
-    (Path(outdir) / "metrics.json").write_text(json.dumps(metrics, indent=2))
+    (outdir / "metrics.json").write_text(json.dumps(metrics, indent=2))
 
     typer.echo("Evaluation complete.")
-    typer.echo(f"  Residuals         : {Path(outdir) / 'residuals.csv'}")
-    typer.echo(f"  Coefficients      : {Path(outdir) / 'coef_summary.csv'}")
-    if gamma_t is not None and treat_map:
-        typer.echo(f"  Treatment effects : {Path(outdir) / 'treatment_effects.csv'}")
-    if a_cage is not None and cage_map:
-        typer.echo(f"  RE (cage)         : {Path(outdir) / 'random_intercepts_cage.csv'}")
-    if a_env is not None and env_map:
-        typer.echo(f"  RE (env)          : {Path(outdir) / 'random_intercepts_env.csv'}")
-    typer.echo(f"  Metrics           : {Path(outdir) / 'metrics.json'}")
+    for label, path in outputs:
+        typer.echo(f"  {label:18}: {path}")
+    typer.echo(f"  Metrics           : {outdir / 'metrics.json'}")
