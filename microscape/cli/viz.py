@@ -28,7 +28,7 @@ def _read_json_maybe(path: Optional[Path]) -> Optional[Dict[str, Any]]:
     except Exception:
         return None
 
-def _read_csv_maybe(path: Optional[Path]) -> Optional[pd.DataFrame]:
+def _read_table_maybe(path: Optional[Path]) -> Optional[pd.DataFrame]:
     if not path:
         return None
     p = Path(path)
@@ -118,7 +118,7 @@ def _collect_from_metabolism(metabolism_json: Optional[Path]) -> Tuple[Dict[str,
 
 def _collect_from_eval(residuals_csv: Optional[Path]) -> Dict[str, Dict[str, float]]:
     """Residuals per (spot, microbe) from evaluate/residuals.csv."""
-    df = _read_csv_maybe(residuals_csv)
+    df = _read_table_maybe(residuals_csv)
     out: Dict[str, Dict[str, float]] = {}
     if df is None or df.empty:
         return out
@@ -131,11 +131,10 @@ def _collect_from_eval(residuals_csv: Optional[Path]) -> Dict[str, Dict[str, flo
 
 def _collect_from_predict(pred_csv: Optional[Path]) -> Dict[str, Dict[str, float]]:
     """Predicted y_hat_mean per (spot, microbe) from predict/predictions.csv."""
-    df = _read_csv_maybe(pred_csv)
+    df = _read_table_maybe(pred_csv)
     out: Dict[str, Dict[str, float]] = {}
     if df is None or df.empty:
         return out
-    # allow predictions without identifiers; only attach if present
     if not {"spot_id", "microbe"}.issubset(set(df.columns)):
         return out
     val_col = "y_hat_mean" if "y_hat_mean" in df.columns else None
@@ -145,17 +144,45 @@ def _collect_from_predict(pred_csv: Optional[Path]) -> Dict[str, Dict[str, float
         out.setdefault(str(r["microbe"]), {})[str(r["spot_id"])] = _safe(r[val_col])
     return out
 
-def _collect_from_whatif(whatif_csv: Optional[Path]) -> Dict[str, Dict[str, float]]:
-    """What-if delta_mean per (spot, microbe) from whatif/whatif.csv."""
-    df = _read_csv_maybe(whatif_csv)
+def _collect_from_whatif(whatif_path: Optional[Path], baseline_preds_df: Optional[pd.DataFrame]) -> Dict[str, Dict[str, float]]:
+    """
+    What-if delta per (spot, microbe).
+    Accepts either:
+      - legacy CSV with columns ['spot_id','microbe','delta_mean']
+      - predictions CSV with columns ['spot_id','microbe','y_hat_mean']; in this case,
+        if baseline_preds_df is provided and has y_hat_mean for the same keys,
+        we compute delta = whatif - baseline.
+    """
+    df = _read_table_maybe(whatif_path)
     out: Dict[str, Dict[str, float]] = {}
     if df is None or df.empty:
         return out
-    need = {"spot_id", "microbe", "delta_mean"}
-    if not need.issubset(set(df.columns)):
+
+    cols = set(df.columns)
+
+    # Case A: explicit delta file
+    if {"spot_id", "microbe", "delta_mean"}.issubset(cols):
+        for _, r in df.iterrows():
+            out.setdefault(str(r["microbe"]), {})[str(r["spot_id"])] = _safe(r["delta_mean"])
         return out
-    for _, r in df.iterrows():
-        out.setdefault(str(r["microbe"]), {})[str(r["spot_id"])] = _safe(r["delta_mean"])
+
+    # Case B: it's a predictions file; try to compute delta against baseline
+    if {"spot_id", "microbe", "y_hat_mean"}.issubset(cols) and baseline_preds_df is not None:
+        if not {"spot_id", "microbe", "y_hat_mean"}.issubset(set(baseline_preds_df.columns)):
+            return out
+        base = baseline_preds_df[["spot_id","microbe","y_hat_mean"]].copy()
+        base["spot_id"] = base["spot_id"].astype(str)
+        base["microbe"] = base["microbe"].astype(str)
+        base = base.set_index(["spot_id","microbe"])["y_hat_mean"].to_dict()
+
+        for _, r in df.iterrows():
+            key = (str(r["spot_id"]), str(r["microbe"]))
+            if key in base:
+                delta = _safe(r["y_hat_mean"]) - _safe(base[key])
+                out.setdefault(key[1], {})[key[0]] = delta
+        return out
+
+    # Otherwise, can't interpret as delta
     return out
 
 def _build_payload(
@@ -168,8 +195,11 @@ def _build_payload(
     spots, abund_by_microbe, mets_by_id = _collect_from_system(system_yml)
     obj_by_microbe, flux_by_ex, exchange_ids = _collect_from_metabolism(metabolism_json)
     resid_by_microbe = _collect_from_eval(residuals_csv)
+
+    # Baseline predictions table if provided (used to compute what-if deltas when needed)
+    pred_df = _read_table_maybe(predictions_csv)
     yhat_by_microbe = _collect_from_predict(predictions_csv)
-    delta_by_microbe = _collect_from_whatif(whatif_csv)
+    delta_by_microbe = _collect_from_whatif(whatif_csv, pred_df)
 
     microbes = sorted(set(list(abund_by_microbe.keys()) +
                           list(obj_by_microbe.keys()) +
@@ -215,7 +245,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>MicroScape Viz Report</title>
 <style>
-  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
   aside { padding: 16px; border-right: 1px solid #eee; overflow: auto; }
   main { padding: 8px; overflow: auto; }
   h1 { font-size: 18px; margin: 0 0 8px; }
@@ -286,7 +316,8 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 
     <div class="footer">
       Tip: choose a layer, then a microbe or metabolite. Missing values are hidden.<br/>
-      Colors: Viridis. Negative (flux uptake) vs positive (secretion) shown on the same scale.
+      Colors: Viridis. Negative (flux uptake) vs positive (secretion) shown on the same scale.<br/>
+      Δ (what-if) is computed as (scenario − baseline) when both predictions are provided.
     </div>
   </div>
 </aside>
@@ -440,7 +471,7 @@ def viz_cmd(
     metabolism_json: Optional[Path] = typer.Option(None, "--metabolism-json", help="metabolism_* .json to show objective/fluxes"),
     eval_residuals: Optional[Path] = typer.Option(None, "--residuals", help="Path to evaluate/residuals.csv"),
     predictions: Optional[Path] = typer.Option(None, "--predictions", help="Path to predict/predictions.csv"),
-    whatif_csv: Optional[Path] = typer.Option(None, "--whatif", help="Path to whatif/whatif.csv"),
+    whatif_csv: Optional[Path] = typer.Option(None, "--whatif", help="Path to what-if output: either delta CSV or what-if predictions CSV"),
     separate_data: bool = typer.Option(False, "--separate-data", help="Also write viz_data.json next to HTML (HTML still embeds data)."),
     filename: str = typer.Option("viz_report.html", help="Output HTML filename"),
 ):
@@ -450,7 +481,8 @@ def viz_cmd(
       - Metabolism: objective (per microbe), exchange fluxes (per microbe + exchange)
       - Model: residuals (per microbe)
       - Predict: y_hat (per microbe)
-      - What-if: delta (per microbe)
+      - What-if: delta (per microbe). If --whatif is a what-if predictions CSV,
+                 and --predictions is also given as baseline predictions, Δ is computed as (scenario − baseline).
     """
     outdir = Path(outdir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
