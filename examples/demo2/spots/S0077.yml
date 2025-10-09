@@ -2,6 +2,9 @@ spot:
   id: S0077
   name: S0077
   env_id: E104
+  position:
+    x_um: 209
+    y_um: 4375
   measurements:
     microbes:
       values:

@@ -2,6 +2,9 @@ spot:
   id: S0218
   name: S0218
   env_id: E201
+  position:
+    x_um: 3542
+    y_um: 418
   measurements:
     microbes:
       values:

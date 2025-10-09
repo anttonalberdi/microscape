@@ -2,6 +2,9 @@ spot:
   id: S0281
   name: S0281
   env_id: E204
+  position:
+    x_um: 1042
+    y_um: 2917
   measurements:
     microbes:
       values:

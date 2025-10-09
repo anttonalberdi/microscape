@@ -2,6 +2,9 @@ spot:
   id: S0260
   name: S0260
   env_id: E203
+  position:
+    x_um: 1876
+    y_um: 4583
   measurements:
     microbes:
       values:

@@ -2,6 +2,9 @@ spot:
   id: S0365
   name: S0365
   env_id: E243
+  position:
+    x_um: 2917
+    y_um: 626
   measurements:
     microbes:
       values:

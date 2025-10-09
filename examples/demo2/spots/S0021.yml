@@ -2,6 +2,9 @@ spot:
   id: S0021
   name: S0021
   env_id: E101
+  position:
+    x_um: 4167
+    y_um: 1667
   measurements:
     microbes:
       values:

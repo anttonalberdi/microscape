@@ -2,6 +2,9 @@ spot:
   id: S0070
   name: S0070
   env_id: E103
+  position:
+    x_um: 3959
+    y_um: 3334
   measurements:
     microbes:
       values:

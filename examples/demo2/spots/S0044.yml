@@ -2,6 +2,9 @@ spot:
   id: S0044
   name: S0044
   env_id: E102
+  position:
+    x_um: 3750
+    y_um: 1
   measurements:
     microbes:
       values:

@@ -2,6 +2,9 @@ spot:
   id: S0162
   name: S0162
   env_id: E143
+  position:
+    x_um: 2292
+    y_um: 3334
   measurements:
     microbes:
       values:

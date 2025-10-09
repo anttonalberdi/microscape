@@ -2,6 +2,9 @@ spot:
   id: S0200
   name: S0200
   env_id: E144
+  position:
+    x_um: 5000
+    y_um: 209
   measurements:
     microbes:
       values:
