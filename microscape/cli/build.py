@@ -213,6 +213,7 @@ def build_cmd(
     # New: control how we match spot IDs between system/spot files and metabolism JSON
     spot_join: str = typer.Option("auto", help="How to join spots to metabolism JSON: auto|id|name|stem"),
     debug_missing: bool = typer.Option(False, help="Write a CSV of spots/microbes missing targets."),
+    spatial: bool = typer.Option(True, "--spatial/--no-spatial", help="Include x_um,y_um,z_um columns if spots have positions."),
 ):
     """
     Build a tidy (spot, microbe) table for modeling by joining spot features
@@ -316,7 +317,14 @@ def build_cmd(
                                 "spot_key": matched_key,
                                 "spot_candidates": ";".join(keys),
                                 "microbe": mid,
-                                "targets": "|".join(targets),
+                        # spatial coordinates (default on if available)
+                        **({
+                            k: v for k, v in {
+                                "x_um": (spot.get("position") or {}).get("x_um"),
+                                "y_um": (spot.get("position") or {}).get("y_um"),
+                                "z_um": (spot.get("position") or {}).get("z_um"),
+                            }.items() if spatial and v is not None
+                        }),        "targets": "|".join(targets),
                                 "values": json.dumps(vals),
                             })
                         continue
@@ -332,7 +340,14 @@ def build_cmd(
                     row = {
                         "spot_id": str(spot.get("name") or spot.get("id") or matched_key or sid),
                         "microbe": mid,
-                        **env_meta,
+                        # spatial coordinates (default on if available)
+                        **({
+                            k: v for k, v in {
+                                "x_um": (spot.get("position") or {}).get("x_um"),
+                                "y_um": (spot.get("position") or {}).get("y_um"),
+                                "z_um": (spot.get("position") or {}).get("z_um"),
+                            }.items() if spatial and v is not None
+                        }),**env_meta,
                         "target": combined,
                     }
                     # keep raw components (diagnostics)
@@ -394,6 +409,7 @@ def build_cmd(
         "columns": list(df.columns),
         "types": {c: str(df[c].dtype) for c in df.columns},
         "spot_join": spot_join,
+        "spatial_columns": bool(spatial),
     }
     (outdir / "schema.json").write_text(json.dumps(schema, indent=2))
 
